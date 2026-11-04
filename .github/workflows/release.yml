@@ -1,0 +1,99 @@
+name: Release
+
+# Push a tag like v0.1.0 → tests run, a release APK is built, signed and published
+# on the Releases page together with its SHA-256 checksum.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # 1.2.3 → 10203 (prerelease suffixes are ignored for the code)
+          CORE="${VERSION%%-*}"
+          IFS=. read -r MA MI PA <<< "$CORE"
+          echo "LIGHTNEET_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "LIGHTNEET_VERSION_CODE=$(( ${MA:-0} * 10000 + ${MI:-0} * 100 + ${PA:-0} ))" >> "$GITHUB_ENV"
+
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LIGHTNEET_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "LIGHTNEET_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGNED_WITH=release" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No release key configured (see docs/RELEASING.md). Building a PREVIEW signed with a throwaway debug key."
+            echo "LIGHTNEET_DEBUG_SIGNED=1" >> "$GITHUB_ENV"
+            echo "SIGNED_WITH=debug" >> "$GITHUB_ENV"
+          fi
+
+      - name: Tests
+        run: ./gradlew :core:jvmTest :app:testDebugUnitTest
+
+      - name: Build release APK
+        env:
+          LIGHTNEET_KEYSTORE_PASSWORD: ${{ secrets.LIGHTNEET_KEYSTORE_PASSWORD }}
+          LIGHTNEET_KEY_ALIAS: ${{ secrets.LIGHTNEET_KEY_ALIAS }}
+          LIGHTNEET_KEY_PASSWORD: ${{ secrets.LIGHTNEET_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease
+
+      - name: Verify and collect
+        run: |
+          set -e
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | tee signer.txt
+          if "$BT/aapt2" dump permissions "$APK" | grep -E "INTERNET|NETWORK"; then
+            echo "::error::Network permission found in the APK"; exit 1
+          fi
+          OUT="Lightneet-${LIGHTNEET_VERSION_NAME}.apk"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" > "$OUT.sha256"
+          echo "APK_NAME=$OUT" >> "$GITHUB_ENV"
+          echo "CERT_SHA256=$(grep 'SHA-256 digest' signer.txt | head -1 | awk '{print $NF}')" >> "$GITHUB_ENV"
+
+      - name: Release notes
+        run: |
+          {
+            echo "## Lightneet ${LIGHTNEET_VERSION_NAME}"
+            echo
+            if [ "$SIGNED_WITH" = "debug" ]; then
+              echo "> ⚠️ **Предварительная сборка.** Подписана временным ключом. Следующие версии с другим ключом нельзя будет установить поверх — понадобится удалить приложение, **а вместе с ним и всё хранилище**. Не храните здесь единственные копии важных файлов."
+              echo
+            fi
+            echo "**Установка:** скачайте \`${APK_NAME}\`, откройте его на телефоне и разрешите установку из этого источника. Android 9+."
+            echo
+            echo "**Проверка подлинности:**"
+            echo '```'
+            cat "${APK_NAME}.sha256"
+            echo "Сертификат подписи SHA-256: ${CERT_SHA256}"
+            echo '```'
+            echo
+            echo "Приложение не запрашивает доступ в интернет. Формат хранения: [SPEC.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/SPEC.md), модель угроз: [THREAT_MODEL.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/THREAT_MODEL.md)."
+          } > notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Lightneet ${{ env.LIGHTNEET_VERSION_NAME }}
+          body_path: notes.md
+          prerelease: ${{ env.SIGNED_WITH == 'debug' || contains(github.ref_name, '-') }}
+          files: |
+            ${{ env.APK_NAME }}
+            ${{ env.APK_NAME }}.sha256
