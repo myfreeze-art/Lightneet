@@ -43,7 +43,13 @@ jobs:
                       body = (bad.get('message') or '') + '\n' + (bad.text or '')
                       emit(f"{case.get('classname')}.{case.get('name')}", '\n'.join(body.splitlines()[:40]))
           if os.path.exists('build.log'):
-              lines = [l for l in open('build.log', errors='ignore') if re.match(r'^(e:|FAILURE|\* What went wrong|.*FAILED)', l)]
+              log = open('build.log', errors='ignore').readlines()
+              lines = []
+              for i, l in enumerate(log):
+                  if l.startswith('* What went wrong'):
+                      lines += log[i:i + 4]  # the reason is on the lines below
+                  elif re.match(r'^(e:|FAILURE|.*FAILED)', l):
+                      lines.append(l)
               emit('Gradle failure', ''.join(lines[-25:]))
           PY
 

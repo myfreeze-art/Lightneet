@@ -60,7 +60,22 @@ jobs:
             export LIGHTNEET_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
             trap 'shred -u "$LIGHTNEET_KEYSTORE_FILE" 2>/dev/null || rm -f "$LIGHTNEET_KEYSTORE_FILE"' EXIT
             umask 077
-            echo "$KEYSTORE_BASE64" | base64 -d > "$LIGHTNEET_KEYSTORE_FILE"
+            if ! echo "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$LIGHTNEET_KEYSTORE_FILE"; then
+              echo "::error title=Signing key::LIGHTNEET_KEYSTORE_BASE64 is not valid base64 (copied only partly?)"; exit 1
+            fi
+            # Check the key with the JDK tools first, so a wrong secret gives a clear error.
+            if ! keytool -list -keystore "$LIGHTNEET_KEYSTORE_FILE" -storepass:env LIGHTNEET_KEYSTORE_PASSWORD > /dev/null 2>&1; then
+              echo "::error title=Signing key::Cannot open the keystore: LIGHTNEET_KEYSTORE_PASSWORD is wrong or LIGHTNEET_KEYSTORE_BASE64 is damaged (decoded size: $(stat -c%s "$LIGHTNEET_KEYSTORE_FILE") bytes)"; exit 1
+            fi
+            if ! keytool -list -keystore "$LIGHTNEET_KEYSTORE_FILE" -storepass:env LIGHTNEET_KEYSTORE_PASSWORD -alias "$LIGHTNEET_KEY_ALIAS" > /dev/null 2>&1; then
+              echo "::error title=Signing key::The keystore has no key named LIGHTNEET_KEY_ALIAS (expected: lightneet)"; exit 1
+            fi
+            PROBE="$RUNNER_TEMP/probe.jar"
+            echo probe > "$RUNNER_TEMP/probe.txt" && jar cf "$PROBE" -C "$RUNNER_TEMP" probe.txt
+            if ! jarsigner -keystore "$LIGHTNEET_KEYSTORE_FILE" -storepass:env LIGHTNEET_KEYSTORE_PASSWORD -keypass:env LIGHTNEET_KEY_PASSWORD "$PROBE" "$LIGHTNEET_KEY_ALIAS" > /dev/null 2>&1; then
+              echo "::error title=Signing key::LIGHTNEET_KEY_PASSWORD is wrong (with keytool defaults it equals the keystore password)"; exit 1
+            fi
+            rm -f "$PROBE" "$RUNNER_TEMP/probe.txt"
           fi
           ./gradlew :app:assembleRelease --no-daemon --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
 
@@ -113,7 +128,13 @@ jobs:
                       body = (bad.get('message') or '') + '\n' + (bad.text or '')
                       emit(f"{case.get('classname')}.{case.get('name')}", '\n'.join(body.splitlines()[:40]))
           if os.path.exists('build.log'):
-              lines = [l for l in open('build.log', errors='ignore') if re.match(r'^(e:|FAILURE|\* What went wrong|.*FAILED)', l)]
+              log = open('build.log', errors='ignore').readlines()
+              lines = []
+              for i, l in enumerate(log):
+                  if l.startswith('* What went wrong'):
+                      lines += log[i:i + 4]  # the reason is on the lines below
+                  elif re.match(r'^(e:|FAILURE|.*FAILED)', l):
+                      lines.append(l)
               emit('Gradle failure', ''.join(lines[-25:]))
           PY
 
