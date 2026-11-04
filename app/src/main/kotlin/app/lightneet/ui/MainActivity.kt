@@ -1,9 +1,11 @@
 package app.lightneet.ui
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +32,7 @@ import app.lightneet.ui.setup.SetupScreen
 import app.lightneet.ui.settings.SettingsScreen
 import app.lightneet.ui.theme.LightneetTheme
 import app.lightneet.ui.unlock.UnlockScreen
+import app.lightneet.ui.unlock.UnavailableScreen
 import app.lightneet.ui.unlock.UnreadableScreen
 import app.lightneet.ui.viewer.ViewerScreen
 
@@ -42,6 +45,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        hardenWindow()
         receiveShared(intent)
         val autoLock = (application as LightneetApp).autoLock
         setContent {
@@ -58,6 +62,17 @@ class MainActivity : ComponentActivity() {
         receiveShared(intent)
     }
 
+    private fun hardenWindow() {
+        val root = window.decorView
+        // Ignore taps while another app draws over us (tapjacking / overlay attacks).
+        root.filterTouchesWhenObscured = true
+        // Android 14+: only genuine accessibility tools (screen readers) may read our screen;
+        // other apps holding the accessibility permission no longer see file names.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            root.setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)
+        }
+    }
+
     /** "Share → Lightneet": hold the URIs until the vault is unlocked, then offer to import. */
     private fun receiveShared(intent: Intent?) {
         intent ?: return
@@ -66,7 +81,9 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
             else -> emptyList()
         }
-        if (uris.isNotEmpty()) vm.pendingShared.value = vm.pendingShared.value + uris
+        // content:// only: a file:// URI could point into our own private storage.
+        val safe = uris.filter { it.scheme == ContentResolver.SCHEME_CONTENT }
+        if (safe.isNotEmpty()) vm.pendingShared.value = vm.pendingShared.value + safe
     }
 }
 
@@ -97,6 +114,7 @@ private fun Root(vm: AppViewModel, beforeExternal: () -> Unit) {
             }
             Gate.LOCKED -> UnlockScreen(unlockBusy, unlockMessage, pendingShared.size, vm::unlock)
             Gate.UNREADABLE -> UnreadableScreen(vm::eraseUnreadable)
+            Gate.UNAVAILABLE -> UnavailableScreen(vm::refreshGate)
             Gate.OPEN -> when (val s = screen) {
                 Screen.Browser -> BrowserScreen(vm, snackbar, beforeExternal)
                 is Screen.Viewer -> key(s.entryId) { ViewerScreen(vm, s.entryId, beforeExternal) }

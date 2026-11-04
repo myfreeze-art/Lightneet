@@ -140,7 +140,7 @@
     <string name="settings_autolock_hint">Выключение экрана всегда блокирует сразу.</string>
     <string name="settings_attempts">Уничтожить после неверных паролей</string>
     <string name="attempts_off">Выкл</string>
-    <string name="settings_attempts_hint">Счётчик живёт в защищённом чипе: копирование и восстановление хранилища его не сбрасывает.</string>
+    <string name="settings_attempts_hint">Счётчик защищён чипом телефона: копирование и восстановление файлов приложения его не сбрасывает.</string>
     <string name="settings_passwords">Пароли</string>
     <string name="change_password">Сменить пароль</string>
     <string name="panic_password">Панический пароль</string>
@@ -179,5 +179,21 @@
     <string name="error_generic">Ошибка: %1$s</string>
     <string name="error_busy">Дождитесь окончания текущей операции</string>
     <string name="error_move_into_self">Папку нельзя переместить в саму себя</string>
-    <string name="error_password_in_use">Этот пароль уже используется — выберите другой</string>
+    <!-- Security fixes -->
+    <string name="unavailable_short">Защищённый чип сейчас не отвечает. Попробуйте ещё раз.</string>
+    <string name="unavailable_title">Хранилище временно недоступно</string>
+    <string name="unavailable_body">Защищённый чип телефона не ответил. Данные целы — ничего не стёрто. Разблокируйте телефон и попробуйте снова; если повторяется — перезагрузите телефон.</string>
+    <string name="retry">Попробовать снова</string>
+    <string name="error_device_unavailable">Защищённый чип занят — попробуйте ещё раз</string>
+    <string name="error_vault_full">Здесь закончилось место. Увеличьте хранилище в настройках.</string>
+    <string name="error_same_password">Это текущий пароль</string>
+    <string name="error_password_unavailable">Этот пароль нельзя использовать — выберите другой</string>
+    <string name="grow_storage">Увеличить хранилище</string>
+    <string name="grow_storage_hint">Добавляет место, заполненное шумом</string>
+    <string name="grow_dialog_body">Новое место заполняется случайным шумом, как и всё хранилище. Это может занять время.</string>
+    <string name="grow_action">Увеличить</string>
+    <string name="progress_growing">Увеличиваю хранилище…</string>
+    <string name="done_grown">Хранилище увеличено</string>
+    <string name="setup_attempts_title">Лимит неверных паролей</string>
+    <string name="setup_attempts_body">После %1$d неверных паролей подряд всё будет уничтожено. Изменить или отключить можно в настройках.</string>
 </resources>

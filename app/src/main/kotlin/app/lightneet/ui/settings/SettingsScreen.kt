@@ -34,6 +34,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,6 +68,7 @@ private sealed interface SettingsDialog {
     data object Hidden : SettingsDialog
     data object DestroyHidden : SettingsDialog
     data object DestroyAll : SettingsDialog
+    data object Grow : SettingsDialog
 }
 
 private val AUTO_LOCK = listOf(0, 30, 60, 300)
@@ -146,6 +148,7 @@ fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             )
             Info(stringResource(R.string.security_used), "${formatSize(st.usage.usedBytes)} / ${formatSize(st.usage.regionBytes)}")
             Info(stringResource(R.string.security_pool), formatSize(st.usage.poolBytes))
+            Item(stringResource(R.string.grow_storage), stringResource(R.string.grow_storage_hint)) { dialog = SettingsDialog.Grow }
             Info(stringResource(R.string.security_crypto), "Argon2id · XChaCha20-Poly1305")
             Info(stringResource(R.string.security_network), stringResource(R.string.security_network_value))
 
@@ -160,14 +163,39 @@ fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     }
 
     when (dialog) {
-        SettingsDialog.ChangePassword -> PasswordDialog(stringResource(R.string.change_password), null, requireStrong = true, onDismiss = { dialog = null }) { pw, _ -> vm.changePassword(pw) }
-        SettingsDialog.Panic -> PasswordDialog(stringResource(R.string.panic_password), stringResource(R.string.panic_dialog_body), requireStrong = false, withPanicMode = true, onDismiss = { dialog = null }) { pw, mode -> vm.setPanic(pw, mode) }
-        SettingsDialog.Hidden -> PasswordDialog(stringResource(R.string.hidden_create), stringResource(R.string.hidden_dialog_body), requireStrong = true, onDismiss = { dialog = null }) { pw, _ -> vm.createHidden(pw) }
+        SettingsDialog.ChangePassword -> PasswordDialog(stringResource(R.string.change_password), null, onDismiss = { dialog = null }) { pw, _ -> vm.changePassword(pw) }
+        SettingsDialog.Panic -> PasswordDialog(stringResource(R.string.panic_password), stringResource(R.string.panic_dialog_body), withPanicMode = true, onDismiss = { dialog = null }) { pw, mode -> vm.setPanic(pw, mode) }
+        SettingsDialog.Hidden -> PasswordDialog(stringResource(R.string.hidden_create), stringResource(R.string.hidden_dialog_body), onDismiss = { dialog = null }) { pw, _ -> vm.createHidden(pw) }
         SettingsDialog.ClearPanic -> ConfirmDialog(stringResource(R.string.panic_clear), stringResource(R.string.panic_clear_body), stringResource(R.string.clear), vm::clearPanic, { dialog = null })
         SettingsDialog.DestroyHidden -> ConfirmDialog(stringResource(R.string.hidden_destroy), stringResource(R.string.hidden_destroy_body), stringResource(R.string.erase), vm::destroyHidden, { dialog = null }, danger = true)
         SettingsDialog.DestroyAll -> ConfirmDialog(stringResource(R.string.destroy_all), stringResource(R.string.destroy_all_body), stringResource(R.string.erase), vm::destroyEverything, { dialog = null }, danger = true)
+        SettingsDialog.Grow -> GrowDialog(onDismiss = { dialog = null }) { vm.growStorage(it) }
         null -> Unit
     }
+}
+
+private val GROW_OPTIONS = listOf(8, 16, 32, 64) // × 64 MiB
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GrowDialog(onDismiss: () -> Unit, onGrow: (Int) -> Unit) {
+    var segments by remember { mutableIntStateOf(16) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.grow_storage)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.grow_dialog_body), color = LnColors.TextMuted, style = MaterialTheme.typography.bodyMedium)
+                Gap(12.dp)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GROW_OPTIONS.forEach { n -> Chip(n == segments, "+" + formatSize(n * 64L * 1024 * 1024)) { segments = n } }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onGrow(segments); onDismiss() }) { Text(stringResource(R.string.grow_action), color = LnColors.Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = LnColors.TextMuted) } },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
 }
 
 @Composable
@@ -206,7 +234,6 @@ private fun Info(label: String, value: String) {
 private fun PasswordDialog(
     title: String,
     body: String?,
-    requireStrong: Boolean,
     withPanicMode: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (ByteArray, PanicMode) -> Unit,
@@ -216,8 +243,8 @@ private fun PasswordDialog(
     val score = rememberPasswordScore(first)
     var mode by remember { mutableStateOf(PanicMode.DESTROY_HIDDEN) }
     val matches = first.length > 0 && first.sameAs(second)
-    val strongEnough = if (requireStrong) score >= PasswordStrength.REQUIRED_SCORE else first.length >= 4
-    val ok = matches && strongEnough
+    // Every password — including the panic one, which holds the main vault's key — must be strong.
+    val ok = matches && score >= PasswordStrength.REQUIRED_SCORE
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -230,7 +257,7 @@ private fun PasswordDialog(
                 }
                 SecurePasswordField(first, stringResource(R.string.hint_new_password), requestFocus = true)
                 Gap(8.dp)
-                if (requireStrong) StrengthMeter(score)
+                StrengthMeter(score)
                 Gap(8.dp)
                 SecurePasswordField(second, stringResource(R.string.hint_password_repeat))
                 if (second.length > 0 && !matches) {

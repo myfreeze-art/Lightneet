@@ -60,6 +60,7 @@ fun UnlockScreen(busy: Boolean, message: UnlockMessage?, pendingShared: Int, onU
                 pluralStringResource(R.plurals.wrong_password_left, it, it)
             } ?: stringResource(R.string.wrong_password)
             UnlockMessage.Destroyed -> stringResource(R.string.destroyed_title)
+            UnlockMessage.Unavailable -> stringResource(R.string.unavailable_short)
             null -> ""
         }
         Text(text, color = LnColors.Danger, style = MaterialTheme.typography.bodyMedium)
@@ -98,5 +99,25 @@ fun UnreadableScreen(onErase: () -> Unit) {
             stringResource(R.string.unreadable_erase), stringResource(R.string.unreadable_erase_confirm),
             stringResource(R.string.erase), onErase, { confirm = false }, danger = true,
         )
+    }
+}
+
+/** The keystore refused for now. Deliberately offers no "erase" — the data is intact. */
+@Composable
+fun UnavailableScreen(onRetry: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(24.dp),
+    ) {
+        Gap(80.dp)
+        Logo(56.dp)
+        Gap(24.dp)
+        Text(stringResource(R.string.unavailable_title), style = MaterialTheme.typography.headlineMedium)
+        Gap(12.dp)
+        Text(stringResource(R.string.unavailable_body), color = LnColors.TextMuted)
+        Gap(32.dp)
+        PrimaryButton(stringResource(R.string.retry), onRetry)
     }
 }

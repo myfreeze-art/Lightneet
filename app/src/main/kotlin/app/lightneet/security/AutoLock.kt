@@ -19,7 +19,9 @@ import app.lightneet.data.VaultHolder
  *  - the app goes to the background, after the vault's auto-lock delay (0 = immediately).
  *
  * The system file picker is another app, so opening it would normally lock the vault.
- * [allowExternalActivity] suspends the background rule for exactly that one trip.
+ * [allowExternalActivity] relaxes the background rule for that one trip — but only for
+ * [EXTERNAL_TRIP_LIMIT_MS]. Leaving through the picker (e.g. pressing Home inside it) can no
+ * longer keep the vault open indefinitely.
  */
 class AutoLock(private val app: Application, private val holder: VaultHolder) : DefaultLifecycleObserver {
     private val handler = Handler(Looper.getMainLooper())
@@ -33,6 +35,7 @@ class AutoLock(private val app: Application, private val holder: VaultHolder) : 
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
                     externalTrip = false
+                    handler.removeCallbacks(lockNow)
                     holder.lock()
                 }
             },
@@ -51,9 +54,14 @@ class AutoLock(private val app: Application, private val holder: VaultHolder) : 
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        if (externalTrip) return
         val session = holder.session.value ?: return
-        val delay = runCatching { session.settings.autoLockSeconds }.getOrDefault(0)
-        if (delay <= 0) holder.lock() else handler.postDelayed(lockNow, delay * 1000L)
+        val configured = runCatching { session.settings.autoLockSeconds }.getOrDefault(0) * 1000L
+        val delay = if (externalTrip) maxOf(configured, EXTERNAL_TRIP_LIMIT_MS) else configured
+        if (delay <= 0) holder.lock() else handler.postDelayed(lockNow, delay)
+    }
+
+    companion object {
+        /** How long the system file picker may stay open before the vault locks anyway. */
+        const val EXTERNAL_TRIP_LIMIT_MS = 2 * 60 * 1000L
     }
 }

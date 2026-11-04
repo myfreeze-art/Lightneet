@@ -130,7 +130,7 @@
     <string name="settings_autolock_hint">Turning the screen off always locks immediately.</string>
     <string name="settings_attempts">Erase after wrong passwords</string>
     <string name="attempts_off">Off</string>
-    <string name="settings_attempts_hint">The counter lives in secure hardware: copying and restoring the storage does not reset it.</string>
+    <string name="settings_attempts_hint">The counter is protected by the secure chip: copying and restoring the app\'s files does not reset it.</string>
     <string name="settings_passwords">Passwords</string>
     <string name="change_password">Change password</string>
     <string name="panic_password">Panic password</string>
@@ -169,5 +169,21 @@
     <string name="error_generic">Error: %1$s</string>
     <string name="error_busy">Wait for the current operation to finish</string>
     <string name="error_move_into_self">A folder cannot be moved into itself</string>
-    <string name="error_password_in_use">This password is already in use — choose another</string>
+    <!-- Security fixes -->
+    <string name="unavailable_short">Secure hardware is not responding right now. Try again.</string>
+    <string name="unavailable_title">Storage temporarily unavailable</string>
+    <string name="unavailable_body">The phone\'s secure hardware did not answer. Your data is intact — nothing was erased. Unlock the phone and try again; if it keeps happening, restart the phone.</string>
+    <string name="retry">Try again</string>
+    <string name="error_device_unavailable">Secure hardware is busy — try again</string>
+    <string name="error_vault_full">Out of space here. Enlarge the storage in Settings.</string>
+    <string name="error_same_password">That is the current password</string>
+    <string name="error_password_unavailable">This password cannot be used — choose another</string>
+    <string name="grow_storage">Enlarge storage</string>
+    <string name="grow_storage_hint">Adds space filled with noise</string>
+    <string name="grow_dialog_body">New space is filled with random noise, like the rest of the storage. This may take a while.</string>
+    <string name="grow_action">Enlarge</string>
+    <string name="progress_growing">Enlarging storage…</string>
+    <string name="done_grown">Storage enlarged</string>
+    <string name="setup_attempts_title">Wrong-password limit</string>
+    <string name="setup_attempts_body">After %1$d wrong passwords in a row, everything is erased. You can change or disable this in Settings.</string>
 </resources>

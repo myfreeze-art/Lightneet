@@ -13,6 +13,7 @@ import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import app.lightneet.core.vault.Entry
 import app.lightneet.core.vault.VaultFileReader
+import app.lightneet.core.vault.VaultFullException
 import app.lightneet.core.vault.VaultSession
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -40,6 +41,12 @@ class Transfers(private val resolver: ContentResolver) {
         val ok = ArrayList<Uri>()
         val ctx = currentCoroutineContext()
         for ((i, uri) in uris.withIndex()) {
+            // Only content:// — a file:// URI handed to us by another app could point into our
+            // own private storage (confused deputy).
+            if (uri.scheme != ContentResolver.SCHEME_CONTENT) {
+                failed += uri.lastPathSegment ?: "?"
+                continue
+            }
             val (name, size) = describe(uri)
             val label = if (uris.size > 1) "${i + 1}/${uris.size} · $name" else name
             try {
@@ -55,6 +62,8 @@ class Transfers(private val resolver: ContentResolver) {
                 ok += uri
                 runCatching { makeThumbnail(session, entry) }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: VaultFullException) {
                 throw e
             } catch (_: Exception) {
                 failed += name
