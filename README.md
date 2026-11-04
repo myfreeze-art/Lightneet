@@ -60,7 +60,7 @@ docs/   спецификация и модель угроз.
 
 ## Сборка
 
-Нужны JDK 17+ и Android SDK (проще всего через Android Studio).
+Нужны JDK 21+ (lazysodium-android собран под Java 21) и Android SDK (проще всего через Android Studio).
 
 ```bash
 ./gradlew :core:jvmTest              # тесты ядра на настоящем libsodium
