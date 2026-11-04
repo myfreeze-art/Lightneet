@@ -11,15 +11,14 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
 
       - name: Version from tag
         run: |
@@ -45,14 +44,14 @@ jobs:
           fi
 
       - name: Tests
-        run: ./gradlew :core:jvmTest :app:testDebugUnitTest
+        run: ./gradlew :core:jvmTest :app:testDebugUnitTest --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
 
       - name: Build release APK
         env:
           LIGHTNEET_KEYSTORE_PASSWORD: ${{ secrets.LIGHTNEET_KEYSTORE_PASSWORD }}
           LIGHTNEET_KEY_ALIAS: ${{ secrets.LIGHTNEET_KEY_ALIAS }}
           LIGHTNEET_KEY_PASSWORD: ${{ secrets.LIGHTNEET_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease
+        run: ./gradlew :app:assembleRelease --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
 
       - name: Verify and collect
         run: |
@@ -88,6 +87,13 @@ jobs:
             echo
             echo "Приложение не запрашивает доступ в интернет. Формат хранения: [SPEC.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/SPEC.md), модель угроз: [THREAT_MODEL.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/THREAT_MODEL.md)."
           } > notes.md
+
+      - name: Report failure
+        if: failure()
+        run: |
+          [ -f build.log ] || exit 0
+          MSG=$(grep -E "^(e:|FAILURE|\* What went wrong|> |.*FAILED)" build.log | tail -n 25 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Gradle failure::${MSG}"
 
       - uses: softprops/action-gh-release@v2
         with:
