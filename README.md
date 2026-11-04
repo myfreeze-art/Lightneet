@@ -10,6 +10,17 @@
 <img src="docs/screenshots/settings.png" width="200">
 </p>
 
+## Скачать
+
+Готовый APK лежит на странице [**Releases**](https://github.com/myfreeze-art/Lightneet/releases).
+
+Как установить:
+1. Скачайте `Lightneet-<версия>.apk`.
+2. Откройте файл на телефоне.
+3. Разрешите установку из этого источника.
+
+Нужен Android 9 или новее. Как выпускаются релизы: [`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## Что это
 
 Lightneet хранит файлы любого размера в зашифрованном виде. Открыть их может только тот, кто
@@ -49,7 +60,7 @@ docs/   спецификация и модель угроз.
 
 ## Сборка
 
-Нужны JDK 17+ и Android SDK (проще всего через Android Studio).
+Нужны JDK 21+ (lazysodium-android собран под Java 21) и Android SDK (проще всего через Android Studio).
 
 ```bash
 ./gradlew :core:jvmTest              # тесты ядра на настоящем libsodium
@@ -91,5 +102,6 @@ Lightneet also supports a deniable **hidden vault**, a **panic password** that s
 data, and has **no network permission** at all.
 
 See [`docs/SPEC.md`](docs/SPEC.md) and [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+Download the APK from [Releases](https://github.com/myfreeze-art/Lightneet/releases).
 Build with `./gradlew :app:assembleDebug`; test with
 `./gradlew :core:jvmTest :app:testDebugUnitTest`.
