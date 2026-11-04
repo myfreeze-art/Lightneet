@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Generic -->
+    <string name="add">Добавить</string>
+    <string name="back">Назад</string>
+    <string name="cancel">Отмена</string>
+    <string name="clear">Убрать</string>
+    <string name="create">Создать</string>
+    <string name="delete">Удалить</string>
+    <string name="erase">Уничтожить</string>
+    <string name="export">Экспорт</string>
+    <string name="lock">Заблокировать</string>
+    <string name="move">Переместить</string>
+    <string name="next">Далее</string>
+    <string name="rename">Переименовать</string>
+    <string name="save">Сохранить</string>
+    <string name="settings">Настройки</string>
+    <string name="unlock">Открыть</string>
+
+    <!-- Setup -->
+    <string name="setup_tagline">Зашифрованное хранилище, которое ничего о себе не рассказывает.</string>
+    <string name="setup_point_password_title">Открывается только паролем</string>
+    <string name="setup_point_password_body">Ни отпечатка, ни облачного аккаунта. Каждый файл, имя и папка зашифрованы ключом, полученным из вашего пароля.</string>
+    <string name="setup_point_offline_title">Ничего не покидает телефон</string>
+    <string name="setup_point_offline_body">У Lightneet вообще нет доступа в интернет. Хранилище привязано к защищённому чипу этого телефона — копия, унесённая куда-то ещё, бесполезна.</string>
+    <string name="setup_point_norecovery_title">Восстановления нет</string>
+    <string name="setup_point_norecovery_body">Если вы забудете пароль, данные будут потеряны навсегда. Это не баг — это и есть защита.</string>
+    <string name="setup_start">Создать хранилище</string>
+    <string name="setup_password_title">Придумайте пароль</string>
+    <string name="setup_password_body">Длинная фраза и надёжнее, и запоминается легче, чем короткий набор символов.</string>
+    <string name="setup_password_tip_title">Совет</string>
+    <string name="setup_password_tip_body">Четыре-пять случайных слов, например «лампа река кобальт орбита», подобрать очень трудно.</string>
+    <string name="hint_password">Пароль</string>
+    <string name="hint_password_repeat">Повторите пароль</string>
+    <string name="hint_new_password">Новый пароль</string>
+    <string name="passwords_differ">Пароли не совпадают</string>
+    <string name="password_too_weak">Слишком легко угадать — сделайте длиннее</string>
+    <string name="strength_weak">Слабый</string>
+    <string name="strength_fair">Средний</string>
+    <string name="strength_good">Хороший</string>
+    <string name="strength_excellent">Отличный</string>
+    <string name="setup_options_title">Хранилище</string>
+    <string name="setup_options_body">Место резервируется заранее и заполняется случайным шумом, поэтому никто не может узнать, сколько из него занято. При нехватке оно растёт само.</string>
+    <string name="setup_initial_size">Начальный размер</string>
+    <string name="setup_size_hint">Свободно на телефоне: %1$s</string>
+    <string name="setup_reserve">Резерв под скрытый сейф</string>
+    <string name="reserve_none">Нет</string>
+    <string name="reserve_none_body">Всё место — одному сейфу. Скрытый сейф потом добавить нельзя.</string>
+    <string name="reserve_quarter">25% (рекомендуется)</string>
+    <string name="reserve_quarter_body">Каждый 4-й блок отложен. Он выглядит точно так же, как занятое место.</string>
+    <string name="reserve_half">50%</string>
+    <string name="reserve_half_body">Место под большой скрытый сейф ценой половины объёма.</string>
+    <string name="setup_reserve_hint">Резерв существует независимо от того, создадите ли вы скрытый сейф, поэтому он ничего не доказывает.</string>
+    <string name="setup_create">Создать</string>
+    <string name="setup_calibrating">Измеряем телефон</string>
+    <string name="setup_calibrating_body">Настраиваем хэширование пароля так, чтобы каждая попытка подбора стоила атакующему около секунды.</string>
+    <string name="setup_allocating">Заполняем хранилище шумом</string>
+    <string name="setup_allocating_body">Свободное и занятое место должны быть неотличимы. Это делается один раз.</string>
+
+    <!-- Unlock -->
+    <string name="wrong_password">Неверный пароль</string>
+    <plurals name="wrong_password_left">
+        <item quantity="one">Неверный пароль. Осталась %d попытка до уничтожения всех данных</item>
+        <item quantity="few">Неверный пароль. Осталось %d попытки до уничтожения всех данных</item>
+        <item quantity="many">Неверный пароль. Осталось %d попыток до уничтожения всех данных</item>
+        <item quantity="other">Неверный пароль. Осталось %d попытки до уничтожения всех данных</item>
+    </plurals>
+    <string name="destroyed_title">Хранилище уничтожено</string>
+    <string name="destroyed_body">Достигнут лимит попыток, поэтому все сейфы на этом телефоне уничтожены.</string>
+    <plurals name="pending_shared">
+        <item quantity="one">%d файл ждёт импорта</item>
+        <item quantity="few">%d файла ждут импорта</item>
+        <item quantity="many">%d файлов ждут импорта</item>
+        <item quantity="other">%d файла ждут импорта</item>
+    </plurals>
+    <string name="unreadable_title">Хранилище не открывается</string>
+    <string name="unreadable_body">Ключ в защищённом чипе телефона больше не существует (например, после сброса безопасности). Без него данные не расшифровать — никому и никогда.</string>
+    <string name="unreadable_erase">Стереть и начать заново</string>
+    <string name="unreadable_erase_confirm">Нечитаемые данные будут удалены, чтобы освободить место.</string>
+
+    <!-- Browser -->
+    <string name="vault_title">Хранилище</string>
+    <string name="vault_root">Хранилище (верхний уровень)</string>
+    <string name="empty_title">Пока пусто</string>
+    <string name="empty_body">Нажмите «Добавить», чтобы импортировать файлы.</string>
+    <string name="import_files">Импорт файлов</string>
+    <string name="new_folder">Новая папка</string>
+    <string name="sort">Сортировка</string>
+    <string name="sort_name">По имени</string>
+    <string name="sort_newest">Сначала новые</string>
+    <string name="sort_largest">Сначала большие</string>
+    <string name="toggle_view">Сменить вид</string>
+    <string name="select_all">Выбрать все</string>
+    <plurals name="selected">
+        <item quantity="one">Выбран %d</item>
+        <item quantity="few">Выбрано %d</item>
+        <item quantity="many">Выбрано %d</item>
+        <item quantity="other">Выбрано %d</item>
+    </plurals>
+    <string name="move_to">Переместить в</string>
+    <string name="delete_confirm_title">Удалить?</string>
+    <plurals name="delete_confirm_body">
+        <item quantity="one">%d объект будет уничтожен: ключ забыт, блоки перезаписаны.</item>
+        <item quantity="few">%d объекта будут уничтожены: ключи забыты, блоки перезаписаны.</item>
+        <item quantity="many">%d объектов будут уничтожены: ключи забыты, блоки перезаписаны.</item>
+        <item quantity="other">%d объекта будут уничтожены: ключи забыты, блоки перезаписаны.</item>
+    </plurals>
+    <string name="shared_title">Импортировать файлы?</string>
+    <plurals name="shared_body">
+        <item quantity="one">С Lightneet поделились %d файлом.</item>
+        <item quantity="few">С Lightneet поделились %d файлами.</item>
+        <item quantity="many">С Lightneet поделились %d файлами.</item>
+        <item quantity="other">С Lightneet поделились %d файлами.</item>
+    </plurals>
+    <string name="import_action">Импортировать</string>
+    <string name="originals_title">Удалить оригиналы?</string>
+    <plurals name="originals_body">
+        <item quantity="one">Зашифрованные копии в безопасности, но %d незашифрованный оригинал всё ещё на телефоне. Учтите: флеш-память может хранить следы удалённых файлов.</item>
+        <item quantity="few">Зашифрованные копии в безопасности, но %d незашифрованных оригинала всё ещё на телефоне. Учтите: флеш-память может хранить следы удалённых файлов.</item>
+        <item quantity="many">Зашифрованные копии в безопасности, но %d незашифрованных оригиналов всё ещё на телефоне. Учтите: флеш-память может хранить следы удалённых файлов.</item>
+        <item quantity="other">Зашифрованные копии в безопасности, но %d незашифрованных оригинала всё ещё на телефоне. Учтите: флеш-память может хранить следы удалённых файлов.</item>
+    </plurals>
+    <string name="import_done">Импортировано: %1$d</string>
+    <string name="import_failed">Не удалось импортировать: %1$s</string>
+    <string name="originals_deleted">Удалено оригиналов: %1$d из %2$d</string>
+    <string name="export_done">Экспортировано: %1$d</string>
+    <string name="progress_working">Работаю…</string>
+    <string name="progress_deleting">Уничтожаю…</string>
+    <string name="progress_deriving">Вычисляю ключ…</string>
+
+    <!-- Viewer -->
+    <string name="no_preview">Для этого типа нет встроенного просмотра</string>
+    <string name="export_warning">Экспортированный файл больше не зашифрован.</string>
+
+    <!-- Settings -->
+    <string name="settings_autolock">Блокировать при выходе из приложения</string>
+    <string name="autolock_now">Сразу</string>
+    <string name="autolock_seconds">%1$d с</string>
+    <string name="autolock_minutes">%1$d мин</string>
+    <string name="settings_autolock_hint">Выключение экрана всегда блокирует сразу.</string>
+    <string name="settings_attempts">Уничтожить после неверных паролей</string>
+    <string name="attempts_off">Выкл</string>
+    <string name="settings_attempts_hint">Счётчик живёт в защищённом чипе: копирование и восстановление хранилища его не сбрасывает.</string>
+    <string name="settings_passwords">Пароли</string>
+    <string name="change_password">Сменить пароль</string>
+    <string name="panic_password">Панический пароль</string>
+    <string name="panic_password_hint">Выглядит как обычный вход, тайно уничтожает данные</string>
+    <string name="panic_clear">Убрать панический пароль</string>
+    <string name="panic_clear_body">Если панический пароль был задан, он перестанет работать.</string>
+    <string name="panic_dialog_body">Если вас когда-нибудь заставят открыть хранилище, введите этот пароль. На экране не будет видно, что что-то произошло.</string>
+    <string name="panic_mode_hidden">Уничтожить скрытый сейф</string>
+    <string name="panic_mode_hidden_body">Затем открыть этот сейф как обычно.</string>
+    <string name="panic_mode_all">Уничтожить всё</string>
+    <string name="panic_mode_all_body">Затем показать новый пустой сейф.</string>
+    <string name="hidden_create">Создать скрытый сейф</string>
+    <string name="hidden_create_hint">Второй сейф со своим паролем</string>
+    <string name="hidden_dialog_body">Скрытый сейф живёт в зарезервированном месте и отсюда невидим. Создание нового заменяет существующий скрытый сейф, если он был.</string>
+    <string name="hidden_destroy">Уничтожить этот сейф</string>
+    <string name="hidden_destroy_body">Его пароль перестанет работать, а содержимое превратится в шум.</string>
+    <string name="settings_security">Защита</string>
+    <string name="security_hardware">Ключ устройства</string>
+    <string name="level_strongbox">Чип StrongBox</string>
+    <string name="level_tee">Защищённая среда (TEE)</string>
+    <string name="level_software">Только программно</string>
+    <string name="security_used">Занято</string>
+    <string name="security_pool">Хранилище на диске</string>
+    <string name="security_crypto">Шифрование</string>
+    <string name="security_network">Доступ в сеть</string>
+    <string name="security_network_value">Нет</string>
+    <string name="settings_danger">Опасная зона</string>
+    <string name="destroy_all">Уничтожить всё</string>
+    <string name="destroy_all_body">Все сейфы и все пароли на этом телефоне будут уничтожены. Отменить нельзя.</string>
+    <string name="done_password_changed">Пароль изменён</string>
+    <string name="done_panic_set">Панический пароль сохранён</string>
+    <string name="done_panic_cleared">Панический пароль убран</string>
+    <string name="done_hidden_created">Скрытый сейф создан</string>
+
+    <!-- Errors -->
+    <string name="error_generic">Ошибка: %1$s</string>
+    <string name="error_busy">Дождитесь окончания текущей операции</string>
+    <string name="error_move_into_self">Папку нельзя переместить в саму себя</string>
+    <string name="error_password_in_use">Этот пароль уже используется — выберите другой</string>
+</resources>

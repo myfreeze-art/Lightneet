@@ -1,0 +1,435 @@
+package app.lightneet.core.vault
+
+import app.lightneet.core.crypto.Crypto
+import app.lightneet.core.crypto.wipe
+import app.lightneet.core.format.PanicMode
+import app.lightneet.core.format.SlotPayload
+import app.lightneet.core.storage.BlockPool
+import app.lightneet.core.util.ad
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
+import okio.BufferedSink
+import okio.Source
+import okio.buffer
+
+enum class VaultKind { MAIN, HIDDEN }
+
+class VaultLockedException : IllegalStateException("Vault is locked")
+class CorruptedDataException(message: String) : IllegalStateException(message)
+
+data class Usage(val usedBytes: Long, val regionBytes: Long, val poolBytes: Long)
+
+/**
+ * An unlocked vault. Holds the master key in memory until [close] — the app closes the
+ * session whenever it locks, and every key and cached plaintext is wiped.
+ *
+ * All methods are blocking and thread-safe; call them off the main thread.
+ */
+class VaultSession internal constructor(
+    private val vault: Vault,
+    val kind: VaultKind,
+    internal val slotIndex: Int,
+    internal val payload: SlotPayload,
+    private val crypto: Crypto,
+    private val pool: BlockPool,
+    private val region: Region,
+    private val now: () -> Long,
+) : AutoCloseable {
+    private val lock = SynchronizedObject()
+    private val codec = BlockCodec(pool, crypto)
+    private val store = IndexStore(crypto, pool, codec, payload.masterKey, payload.superblockA to payload.superblockB)
+    private lateinit var index: VaultIndex
+    private lateinit var allocator: Allocator
+    private var closed = false
+
+    internal fun initialize(fresh: Boolean) {
+        synchronized(lock) {
+            if (fresh) {
+                index = VaultIndex()
+                allocator = Allocator(pool, region, store.superblockIndices().toHashSet())
+                store.commit(index, allocator)
+            } else {
+                index = store.load() ?: throw CorruptedDataException("vault index is unreadable")
+                val owned = HashSet<Long>()
+                owned += store.superblockIndices()
+                owned += store.indexBlocks
+                index.entries.forEach { e -> e.ownedBlocks().forEach { owned += it } }
+                allocator = Allocator(pool, region, owned)
+            }
+        }
+    }
+
+    val isOpen: Boolean get() = synchronized(lock) { !closed }
+
+    val blockCapacity: Int get() = codec.capacity
+
+    // ---------------------------------------------------------------- browsing
+
+    fun entries(): List<Entry> = read { index.entries }
+
+    fun children(parentId: Long): List<Entry> = read { index.entries.filter { it.parentId == parentId } }
+
+    fun entry(id: Long): Entry? = read { index.entries.firstOrNull { it.id == id } }
+
+    /** Folders from the root down to [id] (inclusive), for breadcrumbs. */
+    fun path(id: Long): List<Entry> = read {
+        val byId = index.entries.associateBy { it.id }
+        generateSequence(byId[id]) { byId[it.parentId] }.toList().reversed()
+    }
+
+    val settings: VaultSettings get() = read { index.settings }
+
+    fun updateSettings(change: (VaultSettings) -> VaultSettings) = mutate { it.copy(settings = change(it.settings)) }
+
+    fun usage(): Usage = read {
+        Usage(
+            usedBytes = allocator.ownedCount.toLong() * pool.blockSize,
+            regionBytes = allocator.capacityBlocks() * pool.blockSize,
+            poolBytes = pool.blockCount * pool.blockSize,
+        )
+    }
+
+    // ---------------------------------------------------------------- changes
+
+    fun createFolder(parentId: Long, name: String): Entry {
+        var created: Entry? = null
+        mutate { idx ->
+            requireFolder(idx, parentId)
+            val e = Entry(
+                id = idx.nextId, parentId = parentId, name = uniqueName(idx, parentId, name),
+                isFolder = true, createdAt = now(), modifiedAt = now(),
+            )
+            created = e
+            idx.copy(nextId = idx.nextId + 1, entries = idx.entries + e)
+        }
+        return created!!
+    }
+
+    /**
+     * Streams [source] into the vault. Memory use is one block regardless of file size.
+     * If anything fails (including cancellation thrown from [onProgress]), every block written
+     * so far is scrubbed and the index is left untouched.
+     */
+    fun importFile(
+        parentId: Long,
+        name: String,
+        mimeType: String,
+        source: Source,
+        onProgress: (bytesDone: Long) -> Unit = {},
+    ): Entry {
+        read { requireFolder(index, parentId) }
+        val id = reserveId()
+        val key = crypto.randomBytes(Crypto.KEY_BYTES)
+        val blocks = ArrayList<Long>()
+        val chunk = ByteArray(codec.capacity)
+        var size = 0L
+        try {
+            source.buffer().use { input ->
+                while (true) {
+                    chunk.fill(0)
+                    var filled = 0
+                    while (filled < chunk.size) {
+                        val n = input.read(chunk, filled, chunk.size - filled)
+                        if (n == -1) break
+                        filled += n
+                    }
+                    if (filled == 0) break
+                    synchronized(lock) {
+                        ensureOpen()
+                        val b = allocator.allocate()
+                        blocks += b
+                        codec.write(b, chunk, key, ad("fd", b, id, (blocks.size - 1).toLong()))
+                    }
+                    size += filled
+                    onProgress(size)
+                    if (filled < chunk.size) break
+                }
+            }
+            chunk.wipe()
+            var created: Entry? = null
+            mutate { idx ->
+                requireFolder(idx, parentId)
+                val e = Entry(
+                    id = id, parentId = parentId, name = uniqueName(idx, parentId, name), isFolder = false,
+                    size = size, mimeType = mimeType, createdAt = now(), modifiedAt = now(),
+                    key = key, blocks = blocks.toList(),
+                )
+                created = e
+                idx.copy(entries = idx.entries + e)
+            }
+            return created!!
+        } catch (t: Throwable) {
+            chunk.wipe()
+            key.wipe()
+            synchronized(lock) {
+                if (!closed) blocks.forEach { pool.scrub(it); allocator.release(it) }
+            }
+            throw t
+        }
+    }
+
+    fun rename(id: Long, newName: String) = mutate { idx ->
+        val e = idx.entries.first { it.id == id }
+        val name = uniqueName(idx, e.parentId, newName, ignoreId = id)
+        idx.copy(entries = idx.entries.map { if (it.id == id) it.copy(name = name, modifiedAt = now()) else it })
+    }
+
+    fun move(ids: Collection<Long>, newParentId: Long) = mutate { idx ->
+        requireFolder(idx, newParentId)
+        val forbidden = descendantsOf(idx, ids)
+        require(newParentId !in forbidden) { "cannot move a folder into itself" }
+        var current = idx
+        for (id in ids) {
+            val e = current.entries.first { it.id == id }
+            val name = uniqueName(current, newParentId, e.name, ignoreId = id)
+            current = current.copy(entries = current.entries.map { if (it.id == id) it.copy(parentId = newParentId, name = name) else it })
+        }
+        current
+    }
+
+    /** Deletes entries (folders recursively). Their keys are forgotten and their blocks scrubbed. */
+    fun delete(ids: Collection<Long>) {
+        synchronized(lock) {
+            ensureOpen()
+            val doomed = descendantsOf(index, ids)
+            val removed = index.entries.filter { it.id in doomed }
+            commit(index.copy(entries = index.entries.filter { it.id !in doomed }))
+            removed.forEach { e ->
+                e.ownedBlocks().forEach { pool.scrub(it); allocator.release(it) }
+                e.key.wipe()
+            }
+        }
+    }
+
+    fun setThumbnail(id: Long, image: ByteArray) {
+        synchronized(lock) {
+            ensureOpen()
+            val e = index.entries.first { it.id == id && !it.isFolder }
+            val cap = codec.capacity
+            val count = (image.size + cap - 1) / cap
+            val blocks = List(count) { allocator.allocate() }
+            val chunk = ByteArray(cap)
+            blocks.forEachIndexed { seq, b ->
+                chunk.fill(0)
+                image.copyInto(chunk, 0, seq * cap, minOf(image.size, (seq + 1) * cap))
+                codec.write(b, chunk, e.key, ad("th", b, id, seq.toLong()))
+            }
+            chunk.wipe()
+            val old = e.thumbnailBlocks
+            commit(index.copy(entries = index.entries.map { if (it.id == id) it.copy(thumbnailBlocks = blocks, thumbnailSize = image.size) else it }))
+            old.forEach { pool.scrub(it); allocator.release(it) }
+        }
+    }
+
+    fun thumbnail(id: Long): ByteArray? = synchronized(lock) {
+        ensureOpen()
+        val e = index.entries.firstOrNull { it.id == id } ?: return null
+        if (e.thumbnailSize == 0) return null
+        val out = ByteArray(e.thumbnailSize)
+        val cap = codec.capacity
+        e.thumbnailBlocks.forEachIndexed { seq, b ->
+            val plain = codec.read(b, e.key, ad("th", b, id, seq.toLong())) ?: throw CorruptedDataException("thumbnail $id")
+            val from = seq * cap
+            plain.copyInto(out, from, 0, minOf(cap, out.size - from))
+            plain.wipe()
+        }
+        out
+    }
+
+    // ---------------------------------------------------------------- reading
+
+    fun openReader(id: Long): VaultFileReader {
+        val e = read { index.entries.first { it.id == id && !it.isFolder } }
+        return VaultFileReader(this, e)
+    }
+
+    /** Convenience for small files (text, images). */
+    fun readAll(id: Long): ByteArray = openReader(id).use { r ->
+        require(r.size <= Int.MAX_VALUE) { "file too large to load at once" }
+        val out = ByteArray(r.size.toInt())
+        var pos = 0
+        while (pos < out.size) {
+            val n = r.read(pos.toLong(), out, pos, out.size - pos)
+            if (n <= 0) break
+            pos += n
+        }
+        out
+    }
+
+    fun exportTo(id: Long, sink: BufferedSink, onProgress: (Long) -> Unit = {}) {
+        openReader(id).use { r ->
+            val buf = ByteArray(codec.capacity)
+            var pos = 0L
+            while (pos < r.size) {
+                val n = r.read(pos, buf, 0, buf.size)
+                if (n <= 0) break
+                sink.write(buf, 0, n)
+                pos += n
+                onProgress(pos)
+            }
+            buf.wipe()
+            sink.flush()
+        }
+    }
+
+    internal fun readFileBlock(entry: Entry, seq: Int): ByteArray = synchronized(lock) {
+        ensureOpen()
+        val b = entry.blocks[seq]
+        codec.read(b, entry.key, ad("fd", b, entry.id, seq.toLong())) ?: throw CorruptedDataException("block $seq of ${entry.name}")
+    }
+
+    // ---------------------------------------------------------------- passwords & vault management
+
+    fun changePassword(newPassword: ByteArray) = vault.changePassword(this, newPassword)
+
+    /** Only from the main vault: the panic slot must carry the main vault's key. */
+    fun setPanicPassword(password: ByteArray, mode: PanicMode) {
+        check(kind == VaultKind.MAIN) { "panic password is configured from the main vault" }
+        vault.setPanicPassword(this, password, mode)
+    }
+
+    /** The main vault cannot know whether a panic password exists; this simply fills the slot with noise. */
+    fun clearPanicPassword() {
+        check(kind == VaultKind.MAIN)
+        vault.clearSlot(Vault.panicSlot)
+    }
+
+    val canCreateHiddenVault: Boolean get() = kind == VaultKind.MAIN && vault.reserveAllowsHidden()
+
+    /**
+     * Creates (or replaces!) the hidden vault. The main vault cannot see whether one exists, so
+     * if it does, it is destroyed. That is deliberate: under coercion, being forced to "create a
+     * hidden vault" destroys the real one instead of revealing it.
+     */
+    fun createHiddenVault(password: ByteArray) {
+        check(canCreateHiddenVault)
+        vault.createHidden(password)
+    }
+
+    /** From inside the hidden vault: destroy it (its slot becomes noise). */
+    fun destroyHiddenVault() {
+        check(kind == VaultKind.HIDDEN)
+        vault.clearSlot(Vault.hiddenSlot)
+        close()
+    }
+
+    var maxAttempts: Int
+        get() = vault.maxAttempts()
+        set(value) = vault.setMaxAttempts(value)
+
+    val protectionLevel get() = vault.protectionLevel
+
+    /** Crypto-erases everything on this phone: every vault, every password. */
+    fun destroyEverything() {
+        close()
+        vault.destroyEverything()
+    }
+
+    // ---------------------------------------------------------------- lifecycle
+
+    override fun close() {
+        synchronized(lock) {
+            if (closed) return
+            closed = true
+            store.close()
+            payload.masterKey.wipe()
+            if (this::index.isInitialized) index.entries.forEach { it.key.wipe() }
+            pool.close()
+        }
+        vault.sessionClosed(this)
+    }
+
+    // ---------------------------------------------------------------- internals
+
+    private fun ensureOpen() {
+        if (closed) throw VaultLockedException()
+    }
+
+    private inline fun <T> read(block: () -> T): T = synchronized(lock) {
+        ensureOpen()
+        block()
+    }
+
+    private fun reserveId(): Long = synchronized(lock) {
+        ensureOpen()
+        val id = index.nextId
+        index = index.copy(nextId = id + 1)
+        id
+    }
+
+    private fun mutate(change: (VaultIndex) -> VaultIndex) {
+        synchronized(lock) {
+            ensureOpen()
+            commit(change(index))
+        }
+    }
+
+    private fun commit(next: VaultIndex) {
+        store.commit(next, allocator)
+        index = next
+    }
+
+    private fun requireFolder(idx: VaultIndex, id: Long) {
+        require(id == Entry.ROOT_ID || idx.entries.any { it.id == id && it.isFolder }) { "no such folder: $id" }
+    }
+
+    private fun descendantsOf(idx: VaultIndex, roots: Collection<Long>): Set<Long> {
+        val result = roots.toHashSet()
+        var frontier = roots.toSet()
+        while (frontier.isNotEmpty()) {
+            val next = idx.entries.filter { it.parentId in frontier && it.id !in result }.map { it.id }.toSet()
+            result += next
+            frontier = next
+        }
+        return result
+    }
+
+    private fun uniqueName(idx: VaultIndex, parentId: Long, wanted: String, ignoreId: Long = -1): String {
+        val clean = wanted.trim().replace('/', '_').ifEmpty { "file" }
+        val taken = idx.entries.filter { it.parentId == parentId && it.id != ignoreId }.map { it.name.lowercase() }.toSet()
+        if (clean.lowercase() !in taken) return clean
+        val dot = clean.lastIndexOf('.').takeIf { it > 0 } ?: clean.length
+        val stem = clean.substring(0, dot)
+        val ext = clean.substring(dot)
+        var n = 2
+        while ("$stem ($n)$ext".lowercase() in taken) n++
+        return "$stem ($n)$ext"
+    }
+}
+
+/**
+ * Random-access reader over one encrypted file. Decrypts one block at a time and keeps only
+ * the most recent block in memory. Used by the image/text viewers, the video player
+ * (seeking works without decrypting the beginning) and export.
+ */
+class VaultFileReader internal constructor(private val session: VaultSession, private val entry: Entry) : AutoCloseable {
+    val size: Long = entry.size
+    val name: String = entry.name
+    val mimeType: String = entry.mimeType
+
+    private val cap = session.blockCapacity
+    private var cachedSeq = -1
+    private var cached: ByteArray? = null
+
+    /** Reads up to [length] bytes at [position]. Returns -1 at end of file. */
+    fun read(position: Long, into: ByteArray, offset: Int, length: Int): Int {
+        if (position >= size) return -1
+        if (length == 0) return 0
+        val seq = (position / cap).toInt()
+        if (seq != cachedSeq) {
+            cached?.wipe()
+            cached = session.readFileBlock(entry, seq)
+            cachedSeq = seq
+        }
+        val within = (position % cap).toInt()
+        val n = minOf(length.toLong(), (cap - within).toLong(), size - position).toInt()
+        cached!!.copyInto(into, offset, within, within + n)
+        return n
+    }
+
+    override fun close() {
+        cached?.wipe()
+        cached = null
+        cachedSeq = -1
+    }
+}

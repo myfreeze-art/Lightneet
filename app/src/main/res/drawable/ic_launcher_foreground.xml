@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A keyhole made of light: an amber ring with a narrow beam cut through it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F2C14E"
+        android:fillType="evenOdd"
+        android:pathData="M54,30 A24,24 0 1,1 53.99,30 Z M54,36 A18,18 0 1,0 54.01,36 Z" />
+    <path
+        android:fillColor="#F2C14E"
+        android:pathData="M54,44 A6,6 0 0,1 57,55.2 L59,66 L49,66 L51,55.2 A6,6 0 0,1 54,44 Z" />
+</vector>
