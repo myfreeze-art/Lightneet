@@ -60,6 +60,8 @@ class CryptoAndFormatTest {
     fun headerRoundTrip() {
         val h = Header(
             4096, 16, HiddenReserve.HALF, KdfParams(3, 1 shl 20), crypto.randomBytes(16), 2, 10,
+            "lightneet-p-abc",
+            Array(Header.SLOT_COUNT) { crypto.randomBytes(Header.EPOCH_BYTES) },
             Array(Header.SLOT_COUNT) { crypto.randomBytes(Header.SLOT_BYTES) },
         )
         val d = assertNotNull(Header.decode(h.encode()))
@@ -67,7 +69,11 @@ class CryptoAndFormatTest {
         assertEquals(2, d.failedAttempts)
         assertEquals(10, d.maxAttempts)
         assertEquals(1L shl 20, d.kdf.memLimitBytes)
-        for (i in 0 until Header.SLOT_COUNT) assertContentEquals(h.slots[i], d.slots[i])
+        assertEquals("lightneet-p-abc", d.pepperKeyId)
+        for (i in 0 until Header.SLOT_COUNT) {
+            assertContentEquals(h.slots[i], d.slots[i])
+            assertContentEquals(h.epochs[i], d.epochs[i])
+        }
     }
 
     @Test

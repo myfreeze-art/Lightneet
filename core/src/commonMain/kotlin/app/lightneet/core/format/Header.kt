@@ -37,7 +37,9 @@ data class KdfParams(val opsLimit: Long, val memLimitBytes: Long) {
  *
  * Every field except the slots is non-secret configuration. The four slots are always
  * present and always the same size; unused ones are random bytes, so nobody can tell how
- * many passwords exist.
+ * many passwords exist. Each slot position also has a 32-byte *epoch*: random bytes mixed
+ * into that vault's index keys and replaced whenever files are deleted, so an old copy of the
+ * pool cannot reveal deleted files even if the password is obtained later.
  */
 class Header(
     val blockSize: Int,
@@ -47,10 +49,14 @@ class Header(
     val salt: ByteArray,
     var failedAttempts: Int,
     var maxAttempts: Int,
+    val pepperKeyId: String,
+    val epochs: Array<ByteArray>,
     val slots: Array<ByteArray>,
 ) {
     init {
         require(salt.size == Crypto.SALT_BYTES)
+        require(pepperKeyId.encodeToByteArray().size in 1..PEPPER_ID_BYTES)
+        require(epochs.size == SLOT_COUNT && epochs.all { it.size == EPOCH_BYTES })
         require(slots.size == SLOT_COUNT && slots.all { it.size == SLOT_BYTES })
     }
 
@@ -60,23 +66,23 @@ class Header(
         w.u32(blockSize).u32(segmentBlocks)
         w.u32(kdf.opsLimit.toInt()).u32((kdf.memLimitBytes / 1024).toInt())
         w.raw(salt).u32(failedAttempts).u32(maxAttempts)
+        val id = pepperKeyId.encodeToByteArray()
+        w.raw(id).skip(PEPPER_ID_BYTES - id.size)
+        epochs.forEach { w.raw(it) }
         slots.forEach { w.raw(it) }
         check(w.pos == SIZE)
         return w.bytes
     }
 
-    fun copy(): Header = Header(
-        blockSize, segmentBlocks, reserve, kdf, salt.copyOf(), failedAttempts, maxAttempts,
-        Array(SLOT_COUNT) { slots[it].copyOf() },
-    )
-
     companion object {
-        val MAGIC = "LNV1".encodeToByteArray()
-        const val VERSION = 1
+        val MAGIC = "LNV2".encodeToByteArray()
+        const val VERSION = 2
         const val SLOT_COUNT = 4
         const val SLOT_PAYLOAD_BYTES = 96
         const val SLOT_BYTES = Crypto.NONCE_BYTES + SLOT_PAYLOAD_BYTES + Crypto.TAG_BYTES
-        const val SIZE = 48 + SLOT_COUNT * SLOT_BYTES
+        const val PEPPER_ID_BYTES = 64
+        const val EPOCH_BYTES = 32
+        const val SIZE = 48 + PEPPER_ID_BYTES + SLOT_COUNT * EPOCH_BYTES + SLOT_COUNT * SLOT_BYTES
 
         /** Slot positions have fixed roles; the role is also written inside the encrypted payload. */
         const val SLOT_MAIN = 0
@@ -99,8 +105,15 @@ class Header(
             val salt = r.raw(Crypto.SALT_BYTES)
             val failed = r.u32()
             val max = r.u32()
+            val idBytes = r.raw(PEPPER_ID_BYTES)
+            val idLength = idBytes.indexOfFirst { it == 0.toByte() }.let { if (it < 0) PEPPER_ID_BYTES else it }
+            if (idLength == 0) return null
+            val pepperId = idBytes.copyOfRange(0, idLength).decodeToString()
+            val epochs = Array(SLOT_COUNT) { r.raw(EPOCH_BYTES) }
             val slots = Array(SLOT_COUNT) { r.raw(SLOT_BYTES) }
-            return Header(blockSize, segmentBlocks, reserve, KdfParams(ops, memKiB * 1024), salt, failed, max, slots)
+            return runCatching {
+                Header(blockSize, segmentBlocks, reserve, KdfParams(ops, memKiB * 1024), salt, failed, max, pepperId, epochs, slots)
+            }.getOrNull()
         }
     }
 }

@@ -85,7 +85,7 @@ class VaultTest {
 
     @Test
     fun noLimitMeansUnlimitedAttempts() {
-        f.create().first.lock()
+        f.create(maxAttempts = 0).first.lock()
         repeat(5) { assertNull(assertIs<UnlockResult.WrongPassword>(f.vault().unlock("x".pw())).attemptsLeft) }
         open(Fixture.MAIN_PW)
     }
@@ -256,6 +256,12 @@ class VaultTest {
             i++
         }
         return out.readByteArray()
+    }
+
+    @Test
+    fun attemptLimitIsOnByDefault() {
+        f.create().first.lock()
+        assertEquals(9, assertIs<UnlockResult.WrongPassword>(f.vault().unlock("x".pw())).attemptsLeft)
     }
 
     @Test

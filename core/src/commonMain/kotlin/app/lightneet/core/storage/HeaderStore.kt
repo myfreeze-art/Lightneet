@@ -1,6 +1,7 @@
 package app.lightneet.core.storage
 
 import app.lightneet.core.device.DeviceBinding
+import app.lightneet.core.device.DeviceResult
 import app.lightneet.core.format.Header
 import app.lightneet.core.util.ByteReader
 import app.lightneet.core.util.ByteWriter
@@ -26,28 +27,35 @@ class HeaderStore(
 
     fun exists(): Boolean = fs.exists(file)
 
-    /** Returns null when there is no header, or when it can no longer be opened (key destroyed). */
-    fun read(): Loaded? {
-        if (!fs.exists(file)) return null
+    fun read(): ReadResult {
+        if (!fs.exists(file)) return ReadResult.Missing
         val bytes = fs.read(file) { readByteArray() }
-        if (bytes.size < 4) return null
+        if (bytes.size < 4) return ReadResult.Gone
         val r = ByteReader(bytes)
         val idLength = r.u32()
-        if (idLength !in 1..256 || bytes.size < 4 + idLength) return null
+        if (idLength !in 1..256 || bytes.size < 4 + idLength) return ReadResult.Gone
         val keyId = r.raw(idLength).decodeToString()
         val sealed = bytes.copyOfRange(r.pos, bytes.size)
-        val plain = device.open(keyId, sealed) ?: return null
-        val header = Header.decode(plain) ?: return null
-        return Loaded(keyId, header)
+        return when (val opened = device.open(keyId, sealed)) {
+            is DeviceResult.Ok -> Header.decode(opened.value)?.let { ReadResult.Loaded(keyId, it) } ?: ReadResult.Gone
+            DeviceResult.KeyGone -> ReadResult.Gone
+            is DeviceResult.Unavailable -> ReadResult.Unavailable(opened.cause)
+        }
     }
 
     /**
      * Seals [header] under a brand-new device key, atomically replaces the file, and only
-     * then destroys [previousKeyId]. Any older copy of the file becomes permanently unreadable.
+     * then destroys [previousKeyId]. Any older copy of the file becomes permanently unreadable
+     * (unless the attacker can also roll back the phone's keystore — see docs/THREAT_MODEL.md).
      */
     fun writeRotating(header: Header, previousKeyId: String?): String {
         val keyId = device.createKey()
-        writeWith(keyId, header)
+        try {
+            writeWith(keyId, header)
+        } catch (t: Throwable) {
+            device.destroyKey(keyId)
+            throw t
+        }
         if (previousKeyId != null && previousKeyId != keyId) device.destroyKey(previousKeyId)
         return keyId
     }
@@ -64,12 +72,22 @@ class HeaderStore(
         fs.atomicMove(tmp, file)
     }
 
-    /** Crypto-erases the header: destroys its key and deletes the file. */
-    fun destroy(keyId: String?) {
-        if (keyId != null) device.destroyKey(keyId)
+    /** Crypto-erases the header: destroys its keys and deletes the file. */
+    fun destroy(vararg keyIds: String?) {
+        keyIds.forEach { if (it != null) device.destroyKey(it) }
         fs.delete(file, mustExist = false)
         fs.delete(tmp, mustExist = false)
     }
 
-    class Loaded(val keyId: String, val header: Header)
+    sealed interface ReadResult {
+        data object Missing : ReadResult
+
+        /** The header exists but can never be opened again (key destroyed, or file tampered with). */
+        data object Gone : ReadResult
+
+        /** The secure hardware refused for now (phone locked, keystore busy). */
+        data class Unavailable(val cause: Throwable?) : ReadResult
+
+        class Loaded(val keyId: String, val header: Header) : ReadResult
+    }
 }
