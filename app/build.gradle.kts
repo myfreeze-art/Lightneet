@@ -13,16 +13,36 @@ android {
         applicationId = "io.github.myfreezeart.lightneet"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes the version derived from the git tag (v1.2.3 → 1.2.3).
+        versionCode = System.getenv("LIGHTNEET_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("LIGHTNEET_VERSION_NAME") ?: "0.1.0"
         ndk {
             // Drop the obsolete armeabi/mips builds that JNA still ships.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         }
     }
 
+    // Release signing key comes from the environment (GitHub secrets in CI), never from the repo.
+    // Without it, CI may fall back to the debug key for preview builds (LIGHTNEET_DEBUG_SIGNED=1).
+    val releaseKeystore = System.getenv("LIGHTNEET_KEYSTORE_FILE")?.let(::file)?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("LIGHTNEET_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("LIGHTNEET_KEY_ALIAS")
+                keyPassword = System.getenv("LIGHTNEET_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = when {
+                releaseKeystore != null -> signingConfigs.getByName("release")
+                System.getenv("LIGHTNEET_DEBUG_SIGNED") == "1" -> signingConfigs.getByName("debug")
+                else -> null
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
