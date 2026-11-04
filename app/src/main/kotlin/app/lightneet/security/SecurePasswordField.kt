@@ -1,9 +1,9 @@
 package app.lightneet.security
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.text.Editable
-import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.HideReturnsTransformationMethod
 import android.text.method.PasswordTransformationMethod
@@ -11,7 +11,7 @@ import android.view.ActionMode
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
-import android.view.View
+import android.view.LayoutInflater
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import androidx.compose.foundation.background
@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.lightneet.R
 import app.lightneet.ui.theme.LnColors
 import java.nio.CharBuffer
 
@@ -142,20 +143,13 @@ private fun createField(
     hintColor: Int,
     onDone: () -> Unit,
     requestFocus: Boolean,
-): EditText = EditText(ctx).apply {
-    background = null
+): EditText = (@SuppressLint("InflateParams") LayoutInflater.from(ctx).inflate(R.layout.secure_password_field, null) as EditText).apply {
     setPadding(0, 24, 0, 24)
     gravity = Gravity.CENTER_VERTICAL
     setTextColor(textColor)
     setHintTextColor(hintColor)
     this.hint = hint
     textSize = 17f
-    isSingleLine = true
-    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-    imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-    importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-    isLongClickable = false
-    setTextIsSelectable(false)
     highlightColor = Color.TRANSPARENT
     customSelectionActionModeCallback = NoCopyPaste
     customInsertionActionModeCallback = NoCopyPaste

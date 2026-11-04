@@ -174,6 +174,8 @@ private fun OptionsStep(onCreate: (segments: Int, reserve: HiddenReserve) -> Uni
     ReserveOption(HiddenReserve.HALF, reserve, R.string.reserve_half, R.string.reserve_half_body) { reserve = it }
     Gap(8.dp)
     Text(stringResource(R.string.setup_reserve_hint), style = MaterialTheme.typography.bodySmall, color = LnColors.TextMuted)
+    Gap(16.dp)
+    InfoCard(stringResource(R.string.setup_attempts_title), stringResource(R.string.setup_attempts_body, Vault.DEFAULT_MAX_ATTEMPTS))
     Gap(28.dp)
     PrimaryButton(stringResource(R.string.setup_create), { onCreate(segments, reserve) })
 }

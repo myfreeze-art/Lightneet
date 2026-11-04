@@ -30,24 +30,33 @@ Lightneet хранит файлы любого размера в зашифро�
   выглядит как однородный шум.
 - **Только пароль.** Ни отпечатка, ни облака. Пароль превращается в ключ через Argon2id, данные
   шифруются через XChaCha20-Poly1305 (libsodium).
-- **Привязка к чипу телефона.** Заголовок дополнительно запечатан ключом Android Keystore /
-  StrongBox. Копия хранилища, вынесенная с телефона, бесполезна: подбирать пароль на
-  видеокартах невозможно.
+- **Привязка к чипу телефона.** В каждой проверке пароля участвует ключ Android Keystore /
+  StrongBox, который нельзя извлечь. Подбирать пароль на видеокартах нельзя, даже если
+  вытащить заголовок с root-доступом: каждая попытка требует чипа именно этого телефона. Пока
+  телефон заблокирован, ключи не работают вообще.
 - **Скрытый сейф.** Второй сейф со своим паролем живёт в резерве, который существует всегда и
   всегда выглядит занятым.
 - **Панический пароль.** Выглядит как обычный вход, но незаметно уничтожает скрытый сейф или
   вообще всё.
-- **Лимит попыток.** После N неверных паролей всё стирается. Счётчик нельзя сбросить
-  копированием и восстановлением файлов: ключ устройства меняется при каждой попытке.
+- **Лимит попыток.** После 10 неверных паролей (можно изменить) всё стирается. Счётчик нельзя
+  сбросить копированием и восстановлением файлов: ключ устройства меняется при каждой попытке.
+- **Удалённое не воскресает.** Старая копия хранилища не раскроет удалённые файлы, даже если
+  позже узнать пароль.
 - **Никакой сети.** У приложения нет разрешения `INTERNET`.
 - **Расшифрованные данные живут только в памяти.** Встроенные просмотрщики для фото, видео (с
-  перемоткой), аудио и текста работают без временных файлов. Ключи стираются при блокировке.
-- **Защита интерфейса:** запрет скриншотов, пустое превью в списке недавних приложений,
-  автоблокировка при сворачивании и выключении экрана, клавиатура не запоминает пароль.
+  перемоткой), аудио и текста работают без временных файлов. При блокировке ключи стираются, а
+  процесс приложения завершается целиком, чтобы в памяти не осталось копий.
+- **Защита интерфейса:**
+  - запрет скриншотов и пустое превью в списке недавних приложений;
+  - автоблокировка при сворачивании и выключении экрана;
+  - клавиатура не запоминает пароль;
+  - на Android 14+ сторонние службы специальных возможностей не видят экран;
+  - защита от наложений поверх приложения.
 
 Подробности:
 - [`docs/SPEC.md`](docs/SPEC.md) — формат хранения;
-- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — от чего приложение защищает, а от чего нет.
+- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — от чего приложение защищает, а от чего нет,
+  включая историю самопроверки безопасности.
 
 ## Устройство проекта
 
@@ -91,12 +100,15 @@ docs/   спецификация и модель угроз.
 Lightneet stores files of any size encrypted with a key derived from your password (Argon2id →
 XChaCha20-Poly1305, via libsodium). Names, folders, sizes and dates are encrypted too.
 
-The storage is a pool of identical random-looking blocks. Its header is additionally sealed by a
-non-exportable Android Keystore/StrongBox key that rotates on every unlock attempt. As a result:
+The storage is a pool of identical random-looking blocks. Every password guess is mixed with an
+HMAC computed inside the phone's Keystore/StrongBox, and the header is sealed under a Keystore key
+that rotates on every unlock attempt. As a result:
 
-- copies taken off the phone are useless;
-- the wrong-password limit cannot be reset by restoring files;
-- destroying the key is a reliable erase.
+- the storage cannot be brute-forced off the phone, even with the header extracted via root;
+- the wrong-password limit (10 by default) cannot be reset by restoring files;
+- deleted files stay unrecoverable from older copies of the storage.
+
+Caveats, including Keystore rollback by root, are listed honestly in the threat model.
 
 Lightneet also supports a deniable **hidden vault**, a **panic password** that silently destroys
 data, and has **no network permission** at all.

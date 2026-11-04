@@ -107,7 +107,7 @@ class AppFlowTest {
             text(dir, "пароли.txt", SECRET_TEXT),
             text(dir, "договор.pdf", "%PDF-1.4 fake"),
         )
-        vm.import(uris)
+        vm.import(uris + Uri.fromFile(File(dir, "Закат.png"))) // file:// must be refused
         waitFor { vm.progress.value == null && vm.entries.value.size == 6 }
         vm.createFolder("Документы")
         waitFor { vm.entries.value.size == 7 }
@@ -182,13 +182,20 @@ class AppFlowTest {
         c.drawCircle(820f, 330f, 140f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66FFFFFF })
         val f = File(dir, name)
         f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        return Uri.fromFile(f)
+        return asContentUri(f)
     }
 
     private fun text(dir: File, name: String, content: String): Uri {
         val f = File(dir, name)
         f.writeText(content)
-        return Uri.fromFile(f)
+        return asContentUri(f)
+    }
+
+    /** The app only accepts content:// URIs (as the system picker and "Share" deliver them). */
+    private fun asContentUri(f: File): Uri {
+        val uri = Uri.Builder().scheme("content").authority("test.files").appendPath(f.name).build()
+        shadowOf(compose.activity.contentResolver).registerInputStreamSupplier(uri) { f.inputStream() }
+        return uri
     }
 
     private companion object {

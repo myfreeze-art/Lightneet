@@ -3,7 +3,8 @@ package app.lightneet.core
 import app.lightneet.core.format.HiddenReserve
 import app.lightneet.core.format.PanicMode
 import app.lightneet.core.vault.Entry
-import app.lightneet.core.vault.PasswordInUseException
+import app.lightneet.core.vault.PasswordUnavailableException
+import app.lightneet.core.vault.SamePasswordException
 import app.lightneet.core.vault.UnlockResult
 import app.lightneet.core.vault.VaultKind
 import app.lightneet.core.vault.VaultSession
@@ -21,7 +22,7 @@ class ParanoidFeaturesTest {
         assertIs<UnlockResult.Opened>(f.vault().unlock(password.pw()), "'$password' should open").session
 
     private fun setUp(reserve: HiddenReserve = HiddenReserve.QUARTER): Long {
-        val (_, main) = f.create(reserve = reserve)
+        val (_, main) = f.create(reserve = reserve, segments = 6)
         main.import("decoy.txt", "boring".encodeToByteArray())
         main.createHiddenVault(HIDDEN_PW.pw())
         main.close()
@@ -58,7 +59,8 @@ class ParanoidFeaturesTest {
 
         val hidden = open(HIDDEN_PW)
         assertContentEquals(bytes(30_000, seed = 42), hidden.readAll(secretId))
-        hidden.import("grow.bin", bytes(120_000, seed = 5)) // the hidden vault grows the pool too
+        hidden.growStorage(10) // the hidden vault never grows the pool by itself; the user enlarges it
+        hidden.import("grow.bin", bytes(120_000, seed = 5))
         hidden.close()
 
         val main2 = open(Fixture.MAIN_PW)
@@ -121,15 +123,61 @@ class ParanoidFeaturesTest {
         open(HIDDEN_PW) // hidden vault survived
     }
 
+    /**
+     * Regression test for the "password in use" oracle: from inside the main vault an attacker
+     * must not be able to test guesses for the hidden password. A correct guess silently
+     * destroys the hidden vault instead of producing an error.
+     */
     @Test
-    fun passwordsMustBeDistinct() {
+    fun noOracleForTheHiddenPassword() {
         setUp()
         val main = open(Fixture.MAIN_PW)
-        assertFailsWith<PasswordInUseException> { main.setPanicPassword(Fixture.MAIN_PW.pw(), PanicMode.DESTROY_HIDDEN) }
-        assertFailsWith<PasswordInUseException> { main.setPanicPassword(HIDDEN_PW.pw(), PanicMode.DESTROY_HIDDEN) }
-        assertFailsWith<PasswordInUseException> { main.changePassword(HIDDEN_PW.pw()) }
+        main.setPanicPassword(HIDDEN_PW.pw(), PanicMode.DESTROY_HIDDEN) // no exception
         main.close()
-        open(HIDDEN_PW) // still intact
+        // The guess hit the hidden slot, which is now gone; the "panic" password just opens main.
+        assertEquals(listOf("decoy.txt"), open(HIDDEN_PW).entries().map { it.name })
+        assertEquals(VaultKind.MAIN, open(HIDDEN_PW).kind)
+    }
+
+    @Test
+    fun changingTheMainPasswordToTheHiddenOneDestroysTheHiddenVault() {
+        setUp()
+        open(Fixture.MAIN_PW).apply { changePassword(HIDDEN_PW.pw()); close() }
+        val s = open(HIDDEN_PW)
+        assertEquals(VaultKind.MAIN, s.kind)
+        assertEquals(listOf("decoy.txt"), s.entries().map { it.name })
+    }
+
+    @Test
+    fun creatingAHiddenVaultWithThePanicPasswordClearsThePanicSlot() {
+        setUp()
+        open(Fixture.MAIN_PW).apply {
+            setPanicPassword(PANIC_PW.pw(), PanicMode.DESTROY_ALL)
+            createHiddenVault(PANIC_PW.pw())
+            close()
+        }
+        assertEquals(VaultKind.HIDDEN, open(PANIC_PW).kind) // opens the new hidden vault, no panic
+        assertEquals(1, open(Fixture.MAIN_PW).entries().size) // main vault untouched
+    }
+
+    @Test
+    fun ownCurrentPasswordIsReported() {
+        setUp()
+        val main = open(Fixture.MAIN_PW)
+        assertFailsWith<SamePasswordException> { main.setPanicPassword(Fixture.MAIN_PW.pw(), PanicMode.DESTROY_HIDDEN) }
+        assertFailsWith<SamePasswordException> { main.createHiddenVault(Fixture.MAIN_PW.pw()) }
+        main.changePassword(Fixture.MAIN_PW.pw()) // re-setting the same password is fine
+        main.close()
+        open(HIDDEN_PW) // untouched
+    }
+
+    @Test
+    fun hiddenVaultCannotTakeAnotherSlotsPassword() {
+        setUp()
+        val hidden = open(HIDDEN_PW)
+        assertFailsWith<PasswordUnavailableException> { hidden.changePassword(Fixture.MAIN_PW.pw()) }
+        hidden.close()
+        assertEquals(VaultKind.MAIN, open(Fixture.MAIN_PW).kind)
     }
 
     @Test

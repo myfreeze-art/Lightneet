@@ -1,7 +1,6 @@
 package app.lightneet.core.vault
 
 import app.lightneet.core.crypto.Crypto
-import app.lightneet.core.crypto.subkey
 import app.lightneet.core.crypto.wipe
 import app.lightneet.core.format.HiddenReserve
 import app.lightneet.core.storage.BlockPool
@@ -50,20 +49,33 @@ internal class BlockCodec(private val pool: BlockPool, private val crypto: Crypt
 }
 
 /**
- * Hands out free blocks of one region, lowest index first, growing the pool when the
- * region is full. "Free" is only known to the vault that owns the region; nobody else can
- * tell which blocks are in use.
+ * Hands out free blocks of one region, lowest index first. "Free" is only known to the vault
+ * that owns the region; nobody else can tell which blocks are in use.
+ *
+ * Only the main vault may grow the pool automatically. If the hidden vault did, the pool would
+ * end up far larger than the main vault could ever explain — a tell-tale sign. When the hidden
+ * region is full, the user enlarges the storage explicitly (a perfectly ordinary action).
  */
-internal class Allocator(private val pool: BlockPool, private val region: Region, private val owned: MutableSet<Long>) {
+internal class Allocator(
+    private val pool: BlockPool,
+    private val region: Region,
+    private val owned: MutableSet<Long>,
+    private val canGrow: Boolean,
+) {
     private var cursor = 0L
 
     val ownedCount: Int get() = owned.size
 
     fun capacityBlocks(): Long = (0 until pool.blockCount).count { region.contains(it) }.toLong()
 
+    fun freeBlocks(): Long = capacityBlocks() - owned.count { it < pool.blockCount }
+
     fun allocate(): Long {
         while (true) {
-            if (cursor >= pool.blockCount) pool.grow(1)
+            if (cursor >= pool.blockCount) {
+                if (!canGrow) throw VaultFullException()
+                pool.grow(1)
+            }
             val i = cursor++
             if (region.contains(i) && owned.add(i)) return i
         }
@@ -74,6 +86,9 @@ internal class Allocator(private val pool: BlockPool, private val region: Region
     }
 }
 
+/** The hidden region has no free blocks left; the storage must be enlarged explicitly. */
+class VaultFullException : IllegalStateException("no free space left in this vault's region")
+
 /**
  * Persists one vault's index using two alternating superblocks (A/B) for crash safety.
  *
@@ -81,21 +96,30 @@ internal class Allocator(private val pool: BlockPool, private val region: Region
  * higher generation into whichever of A/B is older, fsyncs again, and only then scrubs the
  * previous index blocks. If the phone dies at any point, one of the two superblocks still
  * points at a complete index.
+ *
+ * Index and superblock keys depend on the vault's *epoch* (random bytes kept in the sealed
+ * header). Deleting files moves the vault to a new epoch: the new index is written under keys
+ * derived from it, the header is updated, and from then on older copies of the index — which
+ * still list the deleted files' keys — cannot be decrypted, even with the password.
  */
 internal class IndexStore(
     private val crypto: Crypto,
     private val pool: BlockPool,
     private val codec: BlockCodec,
-    master: ByteArray,
+    private val master: ByteArray,
     private val superblocks: Pair<Long, Long>,
+    epoch: ByteArray,
 ) {
-    private val sbKey = crypto.subkey(master, "superblock")
-    private val ixKey = crypto.subkey(master, "index")
+    private var sbKey = keyFor("superblock", epoch)
+    private var ixKey = keyFor("index", epoch)
 
     private var generation = 0L
     private var currentSuperblock = -1L
     var indexBlocks: List<Long> = emptyList()
         private set
+
+    private fun keyFor(label: String, epoch: ByteArray) =
+        crypto.keyedHash(master, "lightneet/v2/$label".encodeToByteArray() + epoch)
 
     fun superblockIndices() = listOf(superblocks.first, superblocks.second)
 
@@ -106,6 +130,7 @@ internal class IndexStore(
         for ((sb, info) in candidates) {
             val bytes = readIndexBytes(info) ?: continue
             val index = runCatching { VaultIndex.decode(bytes) }.getOrNull() ?: continue
+            bytes.wipe()
             generation = info.generation
             currentSuperblock = sb
             indexBlocks = info.blocks
@@ -114,35 +139,50 @@ internal class IndexStore(
         return null
     }
 
-    fun commit(index: VaultIndex, allocator: Allocator) {
+    /**
+     * Writes [index]. With [newEpoch], the index is written under keys of the new epoch and
+     * [persistEpoch] is called once the new superblock is durable, *before* the old index is
+     * scrubbed. If [persistEpoch] fails, the commit is rolled back and the old state stays valid.
+     */
+    fun commit(index: VaultIndex, allocator: Allocator, newEpoch: ByteArray? = null, persistEpoch: () -> Unit = {}) {
         val bytes = index.encode()
         val cap = codec.capacity
         val count = maxOf(1, (bytes.size + cap - 1) / cap)
         val gen = generation + 1
-        val newBlocks = List(count) { allocator.allocate() }
+        val writeIx = newEpoch?.let { keyFor("index", it) } ?: ixKey
+        val writeSb = newEpoch?.let { keyFor("superblock", it) } ?: sbKey
+        val newBlocks = ArrayList<Long>(count)
         try {
+            repeat(count) { newBlocks += allocator.allocate() }
             val chunk = ByteArray(cap)
             newBlocks.forEachIndexed { seq, block ->
                 chunk.fill(0)
                 val from = seq * cap
                 bytes.copyInto(chunk, 0, from, minOf(bytes.size, from + cap))
-                codec.write(block, chunk, ixKey, ad("ix", block, gen, seq.toLong()))
+                codec.write(block, chunk, writeIx, ad("ix", block, gen, seq.toLong()))
             }
             chunk.wipe()
             pool.sync()
             val target = if (currentSuperblock == superblocks.first) superblocks.second else superblocks.first
-            writeSuperblock(target, SuperblockInfo(gen, bytes.size.toLong(), newBlocks))
+            writeSuperblock(target, SuperblockInfo(gen, bytes.size.toLong(), newBlocks), writeSb)
             pool.sync()
-            bytes.wipe()
+            if (newEpoch != null) persistEpoch()
 
             val old = indexBlocks
             generation = gen
             currentSuperblock = target
             indexBlocks = newBlocks
+            if (newEpoch != null) {
+                sbKey.wipe(); ixKey.wipe()
+                sbKey = writeSb; ixKey = writeIx
+            }
             old.forEach { pool.scrub(it); allocator.release(it) }
         } catch (t: Throwable) {
-            newBlocks.forEach { allocator.release(it) }
+            newBlocks.forEach { runCatching { pool.scrub(it) }; allocator.release(it) }
+            if (newEpoch != null) { writeIx.wipe(); writeSb.wipe() }
             throw t
+        } finally {
+            bytes.wipe()
         }
     }
 
@@ -157,11 +197,11 @@ internal class IndexStore(
         return SuperblockInfo(gen, length, List(n) { r.u64() })
     }
 
-    private fun writeSuperblock(index: Long, info: SuperblockInfo) {
+    private fun writeSuperblock(index: Long, info: SuperblockInfo, key: ByteArray) {
         val w = ByteWriter(ByteArray(codec.capacity))
         w.raw(SB_MAGIC).u64(info.generation).u64(info.length).u32(info.blocks.size)
         info.blocks.forEach { w.u64(it) }
-        codec.write(index, w.bytes, sbKey, ad("sb", index))
+        codec.write(index, w.bytes, key, ad("sb", index))
     }
 
     private fun readIndexBytes(info: SuperblockInfo): ByteArray? {

@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
 import androidx.annotation.StringRes
@@ -16,7 +17,10 @@ import app.lightneet.core.device.ProtectionLevel
 import app.lightneet.core.format.HiddenReserve
 import app.lightneet.core.format.PanicMode
 import app.lightneet.core.vault.Entry
-import app.lightneet.core.vault.PasswordInUseException
+import app.lightneet.core.vault.PasswordUnavailableException
+import app.lightneet.core.vault.SamePasswordException
+import app.lightneet.core.vault.VaultFullException
+import app.lightneet.core.device.DeviceUnavailableException
 import app.lightneet.core.vault.UnlockResult
 import app.lightneet.core.vault.Usage
 import app.lightneet.core.vault.Vault
@@ -36,7 +40,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Gate { LOADING, SETUP, LOCKED, UNREADABLE, OPEN }
+enum class Gate { LOADING, SETUP, LOCKED, UNREADABLE, UNAVAILABLE, OPEN }
 
 sealed interface Screen {
     data object Browser : Screen
@@ -47,6 +51,7 @@ sealed interface Screen {
 sealed interface UnlockMessage {
     data class Wrong(val attemptsLeft: Int?) : UnlockMessage
     data object Destroyed : UnlockMessage
+    data object Unavailable : UnlockMessage
 }
 
 data class SetupProgress(val stage: Stage, val fraction: Float) {
@@ -102,7 +107,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val messages = _messages.receiveAsFlow()
 
     private var operation: Job? = null
-    private val thumbnails = LruCache<Long, ImageBitmap>(300)
+    /** Decrypted thumbnails. Evicted bitmaps are recycled so their pixels do not linger. */
+    private val thumbnails = object : LruCache<Long, ImageBitmap>(300) {
+        override fun entryRemoved(evicted: Boolean, key: Long, oldValue: ImageBitmap, newValue: ImageBitmap?) {
+            if (oldValue !== newValue) runCatching { oldValue.asAndroidBitmap().recycle() }
+        }
+    }
 
     private val session: VaultSession? get() = holder.session.value
 
@@ -113,12 +123,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshGate()
     }
 
-    private fun refreshGate() = viewModelScope.launch {
+    fun refreshGate() = viewModelScope.launch {
         val state = withContext(Dispatchers.IO) { holder.vault.state() }
         _gate.value = when (state) {
             VaultState.NONE -> Gate.SETUP
             VaultState.READY -> if (session != null) Gate.OPEN else Gate.LOCKED
             VaultState.UNREADABLE -> Gate.UNREADABLE
+            VaultState.UNAVAILABLE -> Gate.UNAVAILABLE
         }
     }
 
@@ -134,6 +145,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     setupProgress.value = SetupProgress(SetupProgress.Stage.ALLOCATING, done.toFloat() / total)
                 }
                 onOpened(s)
+            } catch (_: DeviceUnavailableException) {
+                say(R.string.error_device_unavailable)
             } catch (e: Exception) {
                 say(R.string.error_generic, e.message ?: "")
             } finally {
@@ -161,6 +174,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     UnlockResult.NoVault -> _gate.value = Gate.SETUP
                     UnlockResult.Unreadable -> _gate.value = Gate.UNREADABLE
+                    UnlockResult.TemporarilyUnavailable -> unlockMessage.value = UnlockMessage.Unavailable
                 }
             } catch (e: Exception) {
                 say(R.string.error_generic, e.message ?: "")
@@ -321,7 +335,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (uris.isEmpty()) return
         val parent = folderId.value
         longOperation(null) { s ->
-            val result = transfers.import(s, parent, uris) { progress.value = it }
+            val result = try {
+                transfers.import(s, parent, uris) { progress.value = it }
+            } catch (_: VaultFullException) {
+                say(R.string.error_vault_full)
+                return@longOperation
+            }
             if (result.failed.isNotEmpty()) say(R.string.import_failed, result.failed.joinToString())
             else say(R.string.import_done, result.imported.size)
             offerDeleteOriginals.value = result.sources
@@ -389,7 +408,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun destroyHidden() = background {
         it.destroyHiddenVault()
-        holder.forget()
+        withContext(Dispatchers.Main) { holder.lock() }
+    }
+
+    fun growStorage(segments: Int) = longOperation(getApplication<Application>().getString(R.string.progress_growing)) { s ->
+        s.growStorage(segments) { done, total -> progress.value = Progress(getApplication<Application>().getString(R.string.progress_growing), done, total) }
+        loadSettingsNow(s)
+        say(R.string.done_grown)
     }
 
     fun destroyEverything() {
@@ -411,8 +436,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 op(s, pw)
                 say(done)
-            } catch (_: PasswordInUseException) {
-                say(R.string.error_password_in_use)
+            } catch (_: SamePasswordException) {
+                say(R.string.error_same_password)
+            } catch (_: PasswordUnavailableException) {
+                say(R.string.error_password_unavailable)
+            } catch (_: DeviceUnavailableException) {
+                say(R.string.error_device_unavailable)
             } finally {
                 pw.wipe()
             }
@@ -435,6 +464,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 block(s)
             } catch (e: CancellationException) {
                 throw e
+            } catch (_: DeviceUnavailableException) {
+                say(R.string.error_device_unavailable)
             } catch (e: Exception) {
                 if (s.isOpen) say(R.string.error_generic, e.message ?: e.javaClass.simpleName)
             }
@@ -454,6 +485,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 block(s)
             } catch (_: CancellationException) {
                 // Cancelled by the user or by locking; partial imports were rolled back by the core.
+            } catch (_: DeviceUnavailableException) {
+                say(R.string.error_device_unavailable)
+            } catch (_: VaultFullException) {
+                say(R.string.error_vault_full)
             } catch (e: Exception) {
                 if (s.isOpen) say(R.string.error_generic, e.message ?: e.javaClass.simpleName)
             } finally {

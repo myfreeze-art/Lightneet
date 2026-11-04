@@ -15,7 +15,7 @@ android {
         targetSdk = 35
         // CI passes the version derived from the git tag (v1.2.3 → 1.2.3).
         versionCode = System.getenv("LIGHTNEET_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("LIGHTNEET_VERSION_NAME") ?: "0.1.0"
+        versionName = System.getenv("LIGHTNEET_VERSION_NAME") ?: "0.2.0"
         ndk {
             // Drop the obsolete armeabi/mips builds that JNA still ships.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")

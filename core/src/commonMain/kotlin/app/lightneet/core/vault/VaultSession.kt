@@ -34,10 +34,11 @@ class VaultSession internal constructor(
     private val pool: BlockPool,
     private val region: Region,
     private val now: () -> Long,
+    epoch: ByteArray,
 ) : AutoCloseable {
     private val lock = SynchronizedObject()
     private val codec = BlockCodec(pool, crypto)
-    private val store = IndexStore(crypto, pool, codec, payload.masterKey, payload.superblockA to payload.superblockB)
+    private val store = IndexStore(crypto, pool, codec, payload.masterKey, payload.superblockA to payload.superblockB, epoch)
     private lateinit var index: VaultIndex
     private lateinit var allocator: Allocator
     private var closed = false
@@ -46,7 +47,7 @@ class VaultSession internal constructor(
         synchronized(lock) {
             if (fresh) {
                 index = VaultIndex()
-                allocator = Allocator(pool, region, store.superblockIndices().toHashSet())
+                allocator = Allocator(pool, region, store.superblockIndices().toHashSet(), canGrow)
                 store.commit(index, allocator)
             } else {
                 index = store.load() ?: throw CorruptedDataException("vault index is unreadable")
@@ -54,10 +55,13 @@ class VaultSession internal constructor(
                 owned += store.superblockIndices()
                 owned += store.indexBlocks
                 index.entries.forEach { e -> e.ownedBlocks().forEach { owned += it } }
-                allocator = Allocator(pool, region, owned)
+                allocator = Allocator(pool, region, owned, canGrow)
             }
+            pool.touchAll()
         }
     }
+
+    private val canGrow get() = kind == VaultKind.MAIN
 
     val isOpen: Boolean get() = synchronized(lock) { !closed }
 
@@ -80,6 +84,19 @@ class VaultSession internal constructor(
     val settings: VaultSettings get() = read { index.settings }
 
     fun updateSettings(change: (VaultSettings) -> VaultSettings) = mutate { it.copy(settings = change(it.settings)) }
+
+    /**
+     * Enlarges the storage by [segments] × 64 MiB of fresh noise. Both regions grow together.
+     * The hidden vault never grows the pool on its own (see [Allocator]); this is how its user
+     * makes room — an ordinary action that reveals nothing.
+     */
+    fun growStorage(segments: Int, onProgress: (done: Long, total: Long) -> Unit = { _, _ -> }) {
+        require(segments in 1..1024)
+        synchronized(lock) {
+            ensureOpen()
+            pool.grow(segments, onProgress)
+        }
+    }
 
     fun usage(): Usage = read {
         Usage(
@@ -193,7 +210,12 @@ class VaultSession internal constructor(
             ensureOpen()
             val doomed = descendantsOf(index, ids)
             val removed = index.entries.filter { it.id in doomed }
-            commit(index.copy(entries = index.entries.filter { it.id !in doomed }))
+            val next = index.copy(entries = index.entries.filter { it.id !in doomed })
+            // New epoch: old copies of the index (which still hold the deleted files' keys)
+            // become undecryptable once the header records the new epoch.
+            val epoch = crypto.randomBytes(Crypto.KEY_BYTES)
+            store.commit(next, allocator, newEpoch = epoch) { vault.setEpoch(slotIndex, epoch) }
+            index = next
             removed.forEach { e ->
                 e.ownedBlocks().forEach { pool.scrub(it); allocator.release(it) }
                 e.key.wipe()
@@ -228,7 +250,7 @@ class VaultSession internal constructor(
         val out = ByteArray(e.thumbnailSize)
         val cap = codec.capacity
         e.thumbnailBlocks.forEachIndexed { seq, b ->
-            val plain = codec.read(b, e.key, ad("th", b, id, seq.toLong())) ?: throw CorruptedDataException("thumbnail $id")
+            val plain = codec.read(b, e.key, ad("th", b, id, seq.toLong())) ?: throw CorruptedDataException("thumbnail block failed authentication")
             val from = seq * cap
             plain.copyInto(out, from, 0, minOf(cap, out.size - from))
             plain.wipe()
@@ -275,11 +297,21 @@ class VaultSession internal constructor(
     internal fun readFileBlock(entry: Entry, seq: Int): ByteArray = synchronized(lock) {
         ensureOpen()
         val b = entry.blocks[seq]
-        codec.read(b, entry.key, ad("fd", b, entry.id, seq.toLong())) ?: throw CorruptedDataException("block $seq of ${entry.name}")
+        codec.read(b, entry.key, ad("fd", b, entry.id, seq.toLong())) ?: throw CorruptedDataException("data block failed authentication")
     }
 
     // ---------------------------------------------------------------- passwords & vault management
 
+    /**
+     * Password rules for every "set a password" action (change, panic, hidden):
+     *
+     *  - The same as this vault's current password → [SamePasswordException].
+     *  - From the main vault, a password that happens to open the panic or hidden slot →
+     *    that slot is **silently destroyed** and the operation proceeds. There is deliberately
+     *    no "already in use" error: under coercion that error would let an attacker test
+     *    guesses for the hidden password, without limit and without touching the attempt counter.
+     *  - From the hidden vault, a password that opens another slot → [PasswordUnavailableException].
+     */
     fun changePassword(newPassword: ByteArray) = vault.changePassword(this, newPassword)
 
     /** Only from the main vault: the panic slot must carry the main vault's key. */
@@ -299,11 +331,12 @@ class VaultSession internal constructor(
     /**
      * Creates (or replaces!) the hidden vault. The main vault cannot see whether one exists, so
      * if it does, it is destroyed. That is deliberate: under coercion, being forced to "create a
-     * hidden vault" destroys the real one instead of revealing it.
+     * hidden vault" destroys the real one instead of revealing it. See [changePassword] for the
+     * password rules.
      */
     fun createHiddenVault(password: ByteArray) {
         check(canCreateHiddenVault)
-        vault.createHidden(password)
+        vault.createHidden(this, password)
     }
 
     /** From inside the hidden vault: destroy it (its slot becomes noise). */
@@ -331,6 +364,7 @@ class VaultSession internal constructor(
         synchronized(lock) {
             if (closed) return
             closed = true
+            runCatching { pool.touchAll() }
             store.close()
             payload.masterKey.wipe()
             if (this::index.isInitialized) index.entries.forEach { it.key.wipe() }

@@ -54,10 +54,19 @@ class VaultHolder(
         _session.value = session
     }
 
+    /**
+     * Called after a session has been locked. The app uses it to end the whole process, so that
+     * no stray copy of a key or of decrypted data (JNA buffers, Strings, Bitmaps) survives in
+     * memory once the vault is locked.
+     */
+    var afterLock: () -> Unit = {}
+
     /** Wipes keys from memory and forgets the session. Safe to call from any thread. */
     fun lock() {
+        val wasOpen = _session.value != null
         vault.lock()
         _session.value = null
+        if (wasOpen) afterLock()
     }
 
     fun forget() {

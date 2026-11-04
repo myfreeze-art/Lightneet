@@ -107,6 +107,25 @@ class BlockPool(
         }
     }
 
+    /**
+     * Updates the modification time of every segment file without changing a single byte:
+     * the first byte of each segment is read and written back.
+     *
+     * Every session does this when it opens and closes. Otherwise file timestamps would show
+     * that some segment changed at a time when the main vault recorded no activity — evidence
+     * that another (hidden) vault exists.
+     */
+    fun touchAll() {
+        synchronized(lock) {
+            val one = ByteArray(1)
+            for (seg in 0 until segmentCount) {
+                val h = handle(seg)
+                if (h.read(0, one, 0, 1) == 1) h.write(0, one, 0, 1)
+                h.flush()
+            }
+        }
+    }
+
     /** fsync every open segment. Called before a commit point (superblock write) is relied on. */
     fun sync() {
         synchronized(lock) { handles.values.forEach { it.flush() } }
