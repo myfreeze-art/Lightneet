@@ -61,3 +61,20 @@ apksigner verify --print-certs Lightneet-0.2.0.apk
 ```
 
 Сертификат должен совпадать от релиза к релизу.
+
+## Хеши зависимостей
+
+Gradle проверяет SHA-256 каждой библиотеки и плагина по файлу `gradle/verification-metadata.xml`,
+а дистрибутив Gradle — по `distributionSha256Sum`. Если артефакт подменили, сборка упадёт.
+
+После изменения зависимостей хеши нужно обновить:
+
+```bash
+./gradlew --write-verification-metadata sha256 \
+  :core:jvmTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease
+```
+
+Затем проверьте diff: новые хеши должны относиться только к тем зависимостям, которые вы меняли.
+
+Для `aapt2` в файл вручную добавлены хеши сборок под macOS и Windows, чтобы проект собирался на
+любой ОС. При обновлении AGP их тоже нужно обновить.
