@@ -13,9 +13,11 @@ android {
         applicationId = "io.github.myfreezeart.lightneet"
         minSdk = 28
         targetSdk = 35
-        // CI passes the version derived from the git tag (v1.2.3 → 1.2.3).
-        versionCode = System.getenv("LIGHTNEET_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("LIGHTNEET_VERSION_NAME") ?: "0.2.0"
+        // CI passes the version derived from the git tag (v1.2.3 → 1.2.3). Without it (local
+        // builds, F-Droid) the code is derived from the name the same way: 0.3.0 → 300.
+        versionName = System.getenv("LIGHTNEET_VERSION_NAME") ?: "0.3.0"
+        versionCode = System.getenv("LIGHTNEET_VERSION_CODE")?.toIntOrNull()
+            ?: versionName!!.substringBefore('-').split('.').map(String::toInt).let { (ma, mi, pa) -> ma * 10000 + mi * 100 + pa }
         ndk {
             // Drop the obsolete armeabi/mips builds that JNA still ships.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -105,6 +107,10 @@ dependencies {
     implementation(libs.compose.material.icons)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    implementation(libs.camera.core)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
     implementation(libs.zxcvbn)
 
     testImplementation(libs.junit)

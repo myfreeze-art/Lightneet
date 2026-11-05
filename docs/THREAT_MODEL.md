@@ -17,12 +17,16 @@ writing.
 | **Coercion: "is there more?"** | The hidden vault lives in a reserve that always exists and always looks used. Slots are always four, and unused ones are noise. Setting passwords never answers "already in use", so guesses for the hidden password cannot be tested from inside the main vault. The hidden vault never grows the storage by itself. Segment timestamps are refreshed by every session. |
 | **Deleted files and old storage copies** | Deletions move the vault to a new epoch. A copy of the storage taken before the deletion stays undecryptable even if the password is obtained later. |
 | **Secrets lingering in memory after lock** | Keys are wiped, and then the whole app process is ended. The OS reclaims its memory, including copies we cannot reach (native buffers, Strings, Bitmaps). |
+| **Keys leaking from memory while unlocked** (swap, core dumps, out-of-bounds reads) | Master keys, index keys and the KEK never exist as JVM arrays. They live in `sodium_malloc` memory: `mlock`ed (never swapped), excluded from core dumps, read-only, fenced by guard pages, and zeroed by `sodium_free`. They are passed to libsodium by pointer, so JNA makes no unwiped copies. |
 | **Shoulder-surfing, screenshots, recent-apps preview** | `FLAG_SECURE`, a blank recents preview, and the same title in every vault. |
 | **Malicious accessibility services / overlays** | On Android 14+, the screen is marked accessibility-data-sensitive, so only genuine accessibility tools can read it. Taps are ignored while another app draws over Lightneet. |
 | **Leaving through the file picker** | Opening the system picker suspends auto-lock for at most 2 minutes. |
 | **Cloud backups / device transfer** | Storage lives in `noBackupFilesDir`, with `allowBackup=false` and every extraction rule excluded. |
 | **Network leaks** | The app has no `INTERNET` permission. It is removed even if a library requests it. |
 | **Keyboard learning the password** | `IME_FLAG_NO_PERSONALIZED_LEARNING`, no suggestions, no autofill, no copy/paste, and no undo history in the field. |
+| **Third-party keyboard logging the password** | Optional built-in keyboard (Settings → Inconspicuousness). It types straight into the field without building Strings and shows no key pop-ups. The system keyboard is never opened while it is on. |
+| **Camera photos ending up in the gallery** | The built-in camera receives the JPEG as an in-memory buffer (no file, no MediaStore entry), encrypts it, and zeroes the buffer. Rotated photos are re-encoded, which also drops EXIF metadata. |
+| **"What is this app?" at a glance** | The launcher entry and the share-sheet entry can be disguised as "Calculator". |
 | **Confused-deputy imports** | Only `content://` URIs are accepted from other apps. |
 | **Tampering with stored data** | Every block is authenticated, and its position is bound into the associated data. |
 | **Crash mid-write** | A/B superblocks with copy-on-write. An epoch change commits only after the header is durable. |
@@ -42,12 +46,24 @@ writing.
 
   The Android API does not expose hardware rollback resistance for app keys. Full protection
   needs hardware we cannot control.
-- **Memory while unlocked.** Keys and decrypted data are in the app's memory while a vault is open.
-  The JVM and JNA may make copies that cannot be wiped before the process ends.
-- **Third-party keyboards.** They may still log keystrokes despite the flags. A built-in keyboard
-  is on the roadmap.
+- **Memory while unlocked.** Decrypted data and the decrypted index are in the app's memory while
+  a vault is open. The index includes the **per-file keys**, which therefore stay ordinary JVM
+  arrays (only long-lived keys are in guarded memory). The JVM and JNA may make copies that
+  cannot be wiped before the process ends. Android's zram swap is RAM, not disk, so `mlock`
+  mainly helps against core dumps and over-reads rather than swap files.
+- **Third-party keyboards when the built-in one is off.** They may still log keystrokes despite
+  the flags. The built-in keyboard is off by default.
+- **The disguise is skin-deep.** Opening "Calculator" shows Lightneet's lock screen; Settings →
+  Apps, the package name and the APK still say Lightneet. It helps against a glance, not a search.
+- **Two settings live outside the vault**: "built-in keyboard" (an app-private preference) and the
+  disguise (component state kept by Android). Both are needed before unlocking and hold no
+  secrets, but they reveal that the options were chosen.
+- **PDF preview** decrypts the whole file into an anonymous memory file (`memfd`, RAM only, no
+  path) for Android's PDF renderer. It needs Android 11+ and files up to 64 MiB; otherwise
+  export is offered.
 - **Media decoding.** Video playback and thumbnails hand decrypted data to Android's media
-  services (other processes) in memory.
+  services (other processes) in memory. The camera's image pipeline (camera HAL, CameraX) also
+  sees each photo in memory before it is encrypted.
 - **Comparing storage snapshots over time.** An adversary who images the phone twice can see that
   blocks in the reserve changed, even though the main vault never touches them. That suggests a
   hidden vault is in use. Every deniable-encryption design (VeraCrypt included) shares this

@@ -37,6 +37,7 @@ import app.lightneet.R
 import app.lightneet.core.format.HiddenReserve
 import app.lightneet.core.vault.Vault
 import app.lightneet.security.PasswordStrength
+import app.lightneet.security.PasswordKeyboard
 import app.lightneet.security.SecurePasswordField
 import app.lightneet.security.StrengthMeter
 import app.lightneet.security.rememberPasswordScore
@@ -69,24 +70,25 @@ fun SetupScreen(
         step--
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-    ) {
-        when {
-            progress != null -> Creating(progress)
-            step == 0 -> Intro(destroyedNotice) { step = 1 }
-            step == 1 -> PasswordStep { bytes -> password = bytes; step = 2 }
-            else -> OptionsStep { segments, reserve ->
-                val pw = password ?: return@OptionsStep
-                password = null
-                onCreate(pw, segments, reserve)
+    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+        ) {
+            when {
+                progress != null -> Creating(progress)
+                step == 0 -> Intro(destroyedNotice) { step = 1 }
+                step == 1 -> PasswordStep { bytes -> password = bytes; step = 2 }
+                else -> OptionsStep { segments, reserve ->
+                    val pw = password ?: return@OptionsStep
+                    password = null
+                    onCreate(pw, segments, reserve)
+                }
             }
         }
+        if (progress == null && step == 1) PasswordKeyboard()
     }
 }
 

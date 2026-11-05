@@ -8,3 +8,6 @@
 
 # zxcvbn loads its dictionaries from resources.
 -keep class com.nulabinc.zxcvbn.** { *; }
+
+# Pointer-based libsodium bindings (keys in guarded memory), registered with JNA by class.
+-keep class app.lightneet.core.crypto.SodiumNative { *; }

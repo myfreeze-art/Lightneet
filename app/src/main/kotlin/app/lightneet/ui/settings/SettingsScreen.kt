@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -27,6 +28,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -40,9 +42,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import app.lightneet.LightneetApp
 import app.lightneet.R
+import app.lightneet.security.LauncherDisguise
+import app.lightneet.security.PasswordKeyboard
+import app.lightneet.security.rememberBuiltInKeyboard
 import app.lightneet.core.device.ProtectionLevel
 import app.lightneet.core.format.PanicMode
 import app.lightneet.core.vault.VaultKind
@@ -82,6 +90,8 @@ fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
     val back = { vm.screen.value = Screen.Browser }
     BackHandler(onBack = back)
+    val context = LocalContext.current
+    val app = context.applicationContext as LightneetApp
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -133,6 +143,15 @@ fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 if (st.canCreateHidden) {
                     Item(stringResource(R.string.hidden_create), stringResource(R.string.hidden_create_hint)) { dialog = SettingsDialog.Hidden }
                 }
+            }
+
+            SectionLabel(stringResource(R.string.settings_interface))
+            val keyboard by rememberBuiltInKeyboard()
+            Toggle(stringResource(R.string.builtin_keyboard), stringResource(R.string.builtin_keyboard_hint), keyboard) { app.prefs.setBuiltInKeyboard(it) }
+            var disguised by remember { mutableStateOf(LauncherDisguise.isDisguised(context)) }
+            Toggle(stringResource(R.string.disguise), stringResource(R.string.disguise_hint), disguised) {
+                LauncherDisguise.set(context, it)
+                disguised = it
             }
 
             SectionLabel(stringResource(R.string.settings_security))
@@ -223,6 +242,20 @@ private fun Item(title: String, subtitle: String?, onClick: () -> Unit) {
 }
 
 @Composable
+private fun Toggle(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().toggleable(checked, onValueChange = onChange, role = Role.Switch).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = LnColors.TextMuted)
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
 private fun Info(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
         Text(label, Modifier.weight(1f), color = LnColors.TextMuted)
@@ -269,6 +302,8 @@ private fun PasswordDialog(
                     ModeOption(PanicMode.DESTROY_HIDDEN, mode, R.string.panic_mode_hidden, R.string.panic_mode_hidden_body) { mode = it }
                     ModeOption(PanicMode.DESTROY_ALL, mode, R.string.panic_mode_all, R.string.panic_mode_all_body) { mode = it }
                 }
+                Gap(8.dp)
+                PasswordKeyboard()
             }
         },
         confirmButton = {

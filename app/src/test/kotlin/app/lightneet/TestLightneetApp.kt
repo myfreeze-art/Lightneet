@@ -3,6 +3,7 @@ package app.lightneet
 import app.lightneet.core.device.DeviceBinding
 import app.lightneet.core.device.DeviceResult
 import app.lightneet.core.device.ProtectionLevel
+import androidx.lifecycle.ViewModelProvider
 import app.lightneet.data.VaultHolder
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -16,6 +17,13 @@ import javax.crypto.spec.SecretKeySpec
  * lock is disabled: it would end the test JVM.
  */
 class TestLightneetApp : LightneetApp() {
+    override fun onCreate() {
+        // AndroidViewModelFactory caches the first Application in a static field. Robolectric
+        // reuses the JVM between tests, so ViewModels would otherwise talk to a previous test's app.
+        ViewModelProvider.AndroidViewModelFactory::class.java.getDeclaredField("_instance").apply { isAccessible = true }.set(null, null)
+        super.onCreate()
+    }
+
     override fun isMainProcess() = true
     override fun createHolder() = VaultHolder(this, device = InMemoryDeviceBinding())
     override fun endProcess() = Unit

@@ -77,7 +77,10 @@ jobs:
             fi
             rm -f "$PROBE" "$RUNNER_TEMP/probe.txt"
           fi
-          ./gradlew :app:assembleRelease --no-daemon --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
+          # The App Bundle is for Google Play, so it is only built with the permanent key.
+          TASKS=":app:assembleRelease"
+          if [ "$SIGNED_WITH" = "release" ]; then TASKS="$TASKS :app:bundleRelease"; fi
+          ./gradlew $TASKS --no-daemon --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
 
       - name: Verify and collect
         run: |
@@ -92,6 +95,11 @@ jobs:
           cp "$APK" "$OUT"
           sha256sum "$OUT" > "$OUT.sha256"
           echo "APK_NAME=$OUT" >> "$GITHUB_ENV"
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          if [ -f "$AAB" ]; then
+            cp "$AAB" "Lightneet-${LIGHTNEET_VERSION_NAME}.aab"
+            sha256sum "Lightneet-${LIGHTNEET_VERSION_NAME}.aab" > "Lightneet-${LIGHTNEET_VERSION_NAME}.aab.sha256"
+          fi
           echo "CERT_SHA256=$(grep 'SHA-256 digest' signer.txt | head -1 | awk '{print $NF}')" >> "$GITHUB_ENV"
 
       - name: Release notes
@@ -143,6 +151,9 @@ jobs:
           name: Lightneet ${{ env.LIGHTNEET_VERSION_NAME }}
           body_path: notes.md
           prerelease: ${{ env.SIGNED_WITH == 'debug' || contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: false
           files: |
             ${{ env.APK_NAME }}
             ${{ env.APK_NAME }}.sha256
+            Lightneet-${{ env.LIGHTNEET_VERSION_NAME }}.aab
+            Lightneet-${{ env.LIGHTNEET_VERSION_NAME }}.aab.sha256

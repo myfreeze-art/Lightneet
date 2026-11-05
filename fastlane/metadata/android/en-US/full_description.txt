@@ -1,0 +1,21 @@
+Lightneet keeps files of any size encrypted. Only someone who knows the password can open them. There is no password recovery — on purpose.
+
+<b>Everything is encrypted</b>: file contents, names, folders, sizes and dates. From the outside the storage is uniform noise.
+
+<b>Password only.</b> No fingerprint, no cloud. The password becomes a key through Argon2id; data is encrypted with XChaCha20-Poly1305 (libsodium).
+
+<b>Bound to the phone's chip.</b> Every password check involves an Android Keystore / StrongBox key that cannot be extracted, so the storage cannot be brute-forced on GPUs, even with root.
+
+<ul>
+<li><b>Hidden vault</b> with its own password, in a reserve that always looks used.</li>
+<li><b>Panic password</b> that looks like a normal login but silently destroys the hidden vault or everything.</li>
+<li><b>Wrong-password limit</b> that cannot be reset by restoring files.</li>
+<li><b>Built-in camera</b>: photos are encrypted in memory and never reach the gallery.</li>
+<li><b>Built-in password keyboard</b>, so third-party keyboards never see your password.</li>
+<li><b>Viewers</b> for photos, video, audio, text and PDF that work in memory, without temporary files.</li>
+<li><b>Disguise</b>: the launcher icon can pretend to be a Calculator.</li>
+<li><b>No network permission</b> at all.</li>
+<li>Keys live in libsodium's locked, guard-paged memory; the app process ends on lock.</li>
+</ul>
+
+Source code, storage format and an honest threat model: https://github.com/myfreeze-art/Lightneet

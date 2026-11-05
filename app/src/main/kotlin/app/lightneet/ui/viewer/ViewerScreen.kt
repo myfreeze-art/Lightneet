@@ -142,6 +142,7 @@ private fun Content(session: VaultSession, e: Entry, active: Boolean, onTap: () 
     when {
         e.mimeType.startsWith("image/") -> ImagePage(session, e, onTap)
         e.mimeType.startsWith("video/") || e.mimeType.startsWith("audio/") -> MediaPage(session, e, active)
+        pdfPreviewSupported(e) -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) PdfPage(session, e) { NoPreview(e, onExport) }
         (e.mimeType.startsWith("text/") || e.mimeType == "application/json" || ext in TEXT_EXTENSIONS) && e.size <= MAX_TEXT_BYTES -> TextPage(session, e)
         else -> NoPreview(e, onExport)
     }

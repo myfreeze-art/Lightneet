@@ -13,6 +13,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.LayoutInflater
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -84,6 +85,35 @@ class SecurePasswordState {
         return diff == 0
     }
 
+    /** Called by the built-in keyboard's "done" key. */
+    internal var onDone: () -> Unit = {}
+
+    private val one = CharArray(1)
+
+    /** Inserts one character at the cursor (built-in keyboard). No String is created. */
+    fun type(c: Char) {
+        val field = editText ?: return
+        val e = field.text
+        val a = minOf(field.selectionStart, field.selectionEnd).coerceAtLeast(0)
+        val b = maxOf(field.selectionStart, field.selectionEnd).coerceAtLeast(0)
+        one[0] = c
+        e.replace(a, b, CharBuffer.wrap(one))
+        one[0] = '\u0000'
+    }
+
+    /** Deletes the character before the cursor, overwriting it first. */
+    fun backspace() {
+        val field = editText ?: return
+        val e = field.text
+        val a = minOf(field.selectionStart, field.selectionEnd)
+        val b = maxOf(field.selectionStart, field.selectionEnd)
+        when {
+            a < 0 -> return
+            a != b -> e.delete(a, b)
+            a > 0 -> { e.replace(a - 1, a, "\u0000"); e.delete(a - 1, a) }
+        }
+    }
+
     fun clear() {
         editText?.text?.let { e ->
             e.replace(0, e.length, "\u0000".repeat(e.length))
@@ -107,7 +137,16 @@ fun SecurePasswordField(
     val textColor = LnColors.Text.toArgb()
     val hintColor = LnColors.TextMuted.toArgb()
 
-    DisposableEffect(state) { onDispose { state.clear(); state.editText = null } }
+    val builtIn by rememberBuiltInKeyboard()
+    state.onDone = onDone
+
+    DisposableEffect(state) {
+        onDispose {
+            state.clear()
+            state.editText = null
+            if (PasswordKeyboardTarget.current == state) PasswordKeyboardTarget.current = null
+        }
+    }
 
     Row(
         modifier
@@ -121,8 +160,12 @@ fun SecurePasswordField(
         Box(Modifier.weight(1f)) {
             AndroidView(
                 modifier = Modifier.fillMaxWidth(),
-                factory = { ctx -> createField(ctx, state, hint, textColor, hintColor, onDone, requestFocus) },
+                factory = { ctx -> createField(ctx, state, hint, textColor, hintColor, requestFocus) },
                 update = { field ->
+                    if (field.showSoftInputOnFocus == builtIn) {
+                        field.showSoftInputOnFocus = !builtIn
+                        if (builtIn) field.context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(field.windowToken, 0)
+                    }
                     val selection = field.selectionEnd
                     field.transformationMethod = if (visible) HideReturnsTransformationMethod.getInstance() else PasswordTransformationMethod.getInstance()
                     field.setSelection(selection.coerceIn(0, field.length()))
@@ -141,7 +184,6 @@ private fun createField(
     hint: String,
     textColor: Int,
     hintColor: Int,
-    onDone: () -> Unit,
     requestFocus: Boolean,
 ): EditText = (@SuppressLint("InflateParams") LayoutInflater.from(ctx).inflate(R.layout.secure_password_field, null) as EditText).apply {
     setPadding(0, 24, 0, 24)
@@ -154,8 +196,9 @@ private fun createField(
     customSelectionActionModeCallback = NoCopyPaste
     customInsertionActionModeCallback = NoCopyPaste
     setOnEditorActionListener { _, action, _ ->
-        if (action == EditorInfo.IME_ACTION_DONE) { onDone(); true } else false
+        if (action == EditorInfo.IME_ACTION_DONE) { state.onDone(); true } else false
     }
+    setOnFocusChangeListener { _, focused -> if (focused) PasswordKeyboardTarget.current = state }
     addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit

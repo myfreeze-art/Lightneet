@@ -29,6 +29,7 @@ import app.lightneet.core.vault.VaultSession
 import app.lightneet.core.vault.VaultState
 import app.lightneet.data.Progress
 import app.lightneet.data.Transfers
+import app.lightneet.data.encryptPhoto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +47,7 @@ sealed interface Screen {
     data object Browser : Screen
     data class Viewer(val entryId: Long) : Screen
     data object Settings : Screen
+    data object Camera : Screen
 }
 
 sealed interface UnlockMessage {
@@ -377,6 +379,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Photos taken by the built-in camera in this visit to the camera screen. */
+    val photosTaken = MutableStateFlow(0)
+
+    fun openCamera() {
+        photosTaken.value = 0
+        screen.value = Screen.Camera
+    }
+
+    /** Encrypts a JPEG from the camera's memory buffer into the current folder, then wipes it. */
+    fun savePhoto(jpeg: ByteArray, rotationDegrees: Int) {
+        if (session == null) {
+            jpeg.wipe()
+            return
+        }
+        val parent = folderId.value
+        background { s ->
+            try {
+                encryptPhoto(s, parent, jpeg, rotationDegrees, System.currentTimeMillis())
+                photosTaken.value++
+            } catch (_: VaultFullException) {
+                say(R.string.error_vault_full)
+            } finally {
+                jpeg.wipe()
+            }
+            refreshOnMain()
+        }
+    }
+
     fun cancelOperation() {
         operation?.cancel()
     }
@@ -499,6 +529,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun refreshOnMain() = withContext(Dispatchers.Main) { refresh() }
+
+    fun toast(@StringRes id: Int, vararg args: Any) = say(id, *args)
 
     private fun say(@StringRes id: Int, vararg args: Any) {
         _messages.trySend(getApplication<Application>().getString(id, *args))
