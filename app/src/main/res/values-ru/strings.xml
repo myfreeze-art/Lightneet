@@ -196,4 +196,29 @@
     <string name="done_grown">Хранилище увеличено</string>
     <string name="setup_attempts_title">Лимит неверных паролей</string>
     <string name="setup_attempts_body">После %1$d неверных паролей подряд всё будет уничтожено. Изменить или отключить можно в настройках.</string>
+
+    <!-- Дорожная карта: клавиатура, маскировка, камера -->
+    <string name="disguise_label">Калькулятор</string>
+    <string name="settings_interface">Незаметность</string>
+    <string name="builtin_keyboard">Встроенная клавиатура для паролей</string>
+    <string name="builtin_keyboard_hint">Пароли набираются на клавиатуре самого Lightneet, и сторонняя клавиатура их не видит.</string>
+    <string name="disguise">Маскировка под «Калькулятор»</string>
+    <string name="disguise_hint">Значок и название в списке приложений и в меню «Поделиться» станут «Калькулятор». Ярлык на рабочем столе может пропасть — добавьте его заново из списка приложений.</string>
+    <string name="kb_shift">Shift</string>
+    <string name="kb_backspace">Стереть</string>
+    <string name="kb_language">Сменить язык</string>
+    <string name="kb_space">Пробел</string>
+    <string name="kb_done">Готово</string>
+    <string name="take_photo">Снять фото</string>
+    <string name="camera_shutter">Снимок</string>
+    <string name="camera_switch">Сменить камеру</string>
+    <string name="camera_denied">Чтобы снимать, Lightneet нужен доступ к камере</string>
+    <string name="camera_failed">Ошибка камеры: %1$s</string>
+    <plurals name="photos_saved">
+        <item quantity="one">%d снимок зашифрован</item>
+        <item quantity="few">%d снимка зашифрованы</item>
+        <item quantity="many">%d снимков зашифровано</item>
+        <item quantity="other">%d снимка зашифровано</item>
+    </plurals>
+    <string name="camera_hint">Снимки сразу попадают в хранилище. В галерею и память телефона они не попадают никогда.</string>
 </resources>

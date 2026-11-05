@@ -1,6 +1,7 @@
 package app.lightneet.core.vault
 
 import app.lightneet.core.crypto.Crypto
+import app.lightneet.core.crypto.SecretKey
 import app.lightneet.core.crypto.wipe
 import app.lightneet.core.format.HiddenReserve
 import app.lightneet.core.storage.BlockPool
@@ -27,24 +28,36 @@ internal class Region(private val reserve: HiddenReserve, val hidden: Boolean) {
 internal class BlockCodec(private val pool: BlockPool, private val crypto: Crypto) {
     val capacity = pool.blockSize - Crypto.NONCE_BYTES - Crypto.TAG_BYTES
 
-    fun write(index: Long, plaintext: ByteArray, key: ByteArray, ad: ByteArray) {
+    fun write(index: Long, plaintext: ByteArray, key: ByteArray, ad: ByteArray) =
+        write(index, plaintext) { ct, nonce -> crypto.seal(ct, plaintext, ad, nonce, key) }
+
+    fun write(index: Long, plaintext: ByteArray, key: SecretKey, ad: ByteArray) =
+        write(index, plaintext) { ct, nonce -> crypto.seal(ct, plaintext, ad, nonce, key) }
+
+    fun read(index: Long, key: ByteArray, ad: ByteArray): ByteArray? =
+        read(index) { out, ct, nonce -> crypto.open(out, ct, ad, nonce, key) }
+
+    fun read(index: Long, key: SecretKey, ad: ByteArray): ByteArray? =
+        read(index) { out, ct, nonce -> crypto.open(out, ct, ad, nonce, key) }
+
+    private inline fun write(index: Long, plaintext: ByteArray, seal: (ct: ByteArray, nonce: ByteArray) -> Unit) {
         require(plaintext.size == capacity)
         val raw = ByteArray(pool.blockSize)
         val nonce = crypto.randomBytes(Crypto.NONCE_BYTES)
         val ct = ByteArray(capacity + Crypto.TAG_BYTES)
-        crypto.seal(ct, plaintext, ad, nonce, key)
+        seal(ct, nonce)
         nonce.copyInto(raw, 0)
         ct.copyInto(raw, Crypto.NONCE_BYTES)
         pool.write(index, raw)
     }
 
-    fun read(index: Long, key: ByteArray, ad: ByteArray): ByteArray? {
+    private inline fun read(index: Long, open: (out: ByteArray, ct: ByteArray, nonce: ByteArray) -> Boolean): ByteArray? {
         val raw = ByteArray(pool.blockSize)
         pool.read(index, raw)
         val nonce = raw.copyOfRange(0, Crypto.NONCE_BYTES)
         val ct = raw.copyOfRange(Crypto.NONCE_BYTES, raw.size)
         val out = ByteArray(capacity)
-        return if (crypto.open(out, ct, ad, nonce, key)) out else null
+        return if (open(out, ct, nonce)) out else null
     }
 }
 
@@ -106,7 +119,7 @@ internal class IndexStore(
     private val crypto: Crypto,
     private val pool: BlockPool,
     private val codec: BlockCodec,
-    private val master: ByteArray,
+    private val master: SecretKey,
     private val superblocks: Pair<Long, Long>,
     epoch: ByteArray,
 ) {
@@ -119,7 +132,7 @@ internal class IndexStore(
         private set
 
     private fun keyFor(label: String, epoch: ByteArray) =
-        crypto.keyedHash(master, "lightneet/v2/$label".encodeToByteArray() + epoch)
+        crypto.deriveKey(master, "lightneet/v2/$label".encodeToByteArray() + epoch)
 
     fun superblockIndices() = listOf(superblocks.first, superblocks.second)
 
@@ -173,13 +186,13 @@ internal class IndexStore(
             currentSuperblock = target
             indexBlocks = newBlocks
             if (newEpoch != null) {
-                sbKey.wipe(); ixKey.wipe()
+                sbKey.close(); ixKey.close()
                 sbKey = writeSb; ixKey = writeIx
             }
             old.forEach { pool.scrub(it); allocator.release(it) }
         } catch (t: Throwable) {
             newBlocks.forEach { runCatching { pool.scrub(it) }; allocator.release(it) }
-            if (newEpoch != null) { writeIx.wipe(); writeSb.wipe() }
+            if (newEpoch != null) { writeIx.close(); writeSb.close() }
             throw t
         } finally {
             bytes.wipe()
@@ -197,7 +210,7 @@ internal class IndexStore(
         return SuperblockInfo(gen, length, List(n) { r.u64() })
     }
 
-    private fun writeSuperblock(index: Long, info: SuperblockInfo, key: ByteArray) {
+    private fun writeSuperblock(index: Long, info: SuperblockInfo, key: SecretKey) {
         val w = ByteWriter(ByteArray(codec.capacity))
         w.raw(SB_MAGIC).u64(info.generation).u64(info.length).u32(info.blocks.size)
         info.blocks.forEach { w.u64(it) }
@@ -220,8 +233,8 @@ internal class IndexStore(
     }
 
     fun close() {
-        sbKey.wipe()
-        ixKey.wipe()
+        sbKey.close()
+        ixKey.close()
     }
 
     private class SuperblockInfo(val generation: Long, val length: Long, val blocks: List<Long>)

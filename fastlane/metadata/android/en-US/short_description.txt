@@ -1,0 +1,1 @@
+Encrypted file vault that tells nothing about itself. No network, no cloud.

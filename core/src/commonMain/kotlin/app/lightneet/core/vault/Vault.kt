@@ -1,6 +1,7 @@
 package app.lightneet.core.vault
 
 import app.lightneet.core.crypto.Crypto
+import app.lightneet.core.crypto.SecretKey
 import app.lightneet.core.crypto.opened
 import app.lightneet.core.crypto.sealed
 import app.lightneet.core.crypto.wipe
@@ -121,7 +122,7 @@ class Vault(
         val kek = deriveKek(password, h)
         val payload = newVaultPayload(SlotType.MAIN, Region(reserve, hidden = false))
         h.slots[SLOT_MAIN] = sealSlot(kek, SLOT_MAIN, h, payload)
-        kek.wipe()
+        kek.close()
         persist()
         openSession(VaultKind.MAIN, SLOT_MAIN, payload, fresh = true)
     }
@@ -174,7 +175,7 @@ class Vault(
                     SlotType.PANIC -> UnlockResult.Opened(panic(kek, h, payload))
                 }
             } finally {
-                kek.wipe()
+                kek.close()
             }
         } catch (_: DeviceUnavailableException) {
             return UnlockResult.TemporarilyUnavailable
@@ -188,13 +189,13 @@ class Vault(
      * crypto-erases what must disappear, rotating the device key so that no stale copy of the
      * header can be opened again.
      */
-    private fun panic(kek: ByteArray, h: Header, payload: SlotPayload): VaultSession = when (payload.panicMode) {
+    private fun panic(kek: SecretKey, h: Header, payload: SlotPayload): VaultSession = when (payload.panicMode) {
         PanicMode.DESTROY_ALL -> {
             for (i in 0 until Header.SLOT_COUNT) {
                 h.slots[i] = crypto.randomBytes(Header.SLOT_BYTES)
                 h.epochs[i] = crypto.randomBytes(Header.EPOCH_BYTES)
             }
-            payload.masterKey.wipe()
+            payload.masterKey.close()
             val fresh = newVaultPayload(SlotType.MAIN, Region(h.reserve, hidden = false))
             h.slots[SLOT_MAIN] = sealSlot(kek, SLOT_MAIN, h, fresh)
             persist()
@@ -214,7 +215,7 @@ class Vault(
         val h = requireHeader()
         val kek = prepareNewPassword(newPassword, h, target = s.slotIndex, session = s)
         h.slots[s.slotIndex] = sealSlot(kek, s.slotIndex, h, s.payload)
-        kek.wipe()
+        kek.close()
         persist()
     }
 
@@ -223,7 +224,7 @@ class Vault(
         val kek = prepareNewPassword(password, h, target = SLOT_PANIC, session = main)
         val p = SlotPayload(SlotType.PANIC, mode, main.payload.masterKey, main.payload.superblockA, main.payload.superblockB)
         h.slots[SLOT_PANIC] = sealSlot(kek, SLOT_PANIC, h, p)
-        kek.wipe()
+        kek.close()
         persist()
     }
 
@@ -242,8 +243,8 @@ class Vault(
         }
         h.slots[SLOT_HIDDEN] = sealSlot(kek, SLOT_HIDDEN, h, payload)
         h.epochs[SLOT_HIDDEN] = epoch
-        kek.wipe()
-        payload.masterKey.wipe()
+        kek.close()
+        payload.masterKey.close()
         persist()
     }
 
@@ -317,7 +318,7 @@ class Vault(
 
     private fun newVaultPayload(type: SlotType, region: Region): SlotPayload {
         val (a, b) = region.first(2)
-        return SlotPayload(type, null, crypto.randomBytes(Crypto.KEY_BYTES), a, b)
+        return SlotPayload(type, null, crypto.randomSecretKey(), a, b)
     }
 
     /**
@@ -326,7 +327,7 @@ class Vault(
      * The HMAC runs inside the phone's secure hardware, so every single guess needs this phone.
      * Even an attacker who extracted the header plaintext with root cannot brute-force offline.
      */
-    private fun deriveKek(password: ByteArray, h: Header): ByteArray {
+    private fun deriveKek(password: ByteArray, h: Header): SecretKey {
         val stretched = crypto.argon2id(password, h.salt, h.kdf.opsLimit, h.kdf.memLimitBytes)
         try {
             val pepper = when (val r = device.pepper(h.pepperKeyId, stretched)) {
@@ -334,9 +335,10 @@ class Vault(
                 DeviceResult.KeyGone -> throw DeviceKeyGoneException()
                 is DeviceResult.Unavailable -> throw DeviceUnavailableException(r.cause)
             }
-            val kek = crypto.keyedHash(stretched, KEK_LABEL + pepper)
+            val message = KEK_LABEL + pepper
             pepper.wipe()
-            return kek
+            // The KEK is derived straight into guarded memory and never exists as a JVM array.
+            return crypto.secretKey(stretched).use { crypto.deriveKey(it, message) }.also { message.wipe() }
         } finally {
             stretched.wipe()
         }
@@ -347,20 +349,20 @@ class Vault(
      * password is in use" for slots the caller should not know about — see
      * [VaultSession.changePassword] for the rules.
      */
-    private fun prepareNewPassword(password: ByteArray, h: Header, target: Int, session: VaultSession): ByteArray {
+    private fun prepareNewPassword(password: ByteArray, h: Header, target: Int, session: VaultSession): SecretKey {
         val kek = deriveKek(password, h)
         val hit = findSlot(kek, h)
-        hit?.second?.masterKey?.wipe()
+        hit?.second?.masterKey?.close()
         val slot = hit?.first
         if (slot == null || slot == target) return kek
         when {
             slot == session.slotIndex -> {
-                kek.wipe()
+                kek.close()
                 throw SamePasswordException()
             }
             session.kind == VaultKind.MAIN -> destroySlot(h, slot) // silently: no oracle
             else -> {
-                kek.wipe()
+                kek.close()
                 throw PasswordUnavailableException()
             }
         }
@@ -369,7 +371,7 @@ class Vault(
 
     private fun slotAd(slot: Int, h: Header) = ad("slot", slot.toLong()) + h.salt
 
-    private fun sealSlot(kek: ByteArray, slot: Int, h: Header, payload: SlotPayload): ByteArray {
+    private fun sealSlot(kek: SecretKey, slot: Int, h: Header, payload: SlotPayload): ByteArray {
         val nonce = crypto.randomBytes(Crypto.NONCE_BYTES)
         val plain = payload.encode()
         val ct = crypto.sealed(plain, slotAd(slot, h), nonce, kek)
@@ -378,14 +380,14 @@ class Vault(
     }
 
     /** Tries every slot, always all four, so the time taken does not depend on which one matches. */
-    private fun findSlot(kek: ByteArray, h: Header): Pair<Int, SlotPayload>? {
+    private fun findSlot(kek: SecretKey, h: Header): Pair<Int, SlotPayload>? {
         var found: Pair<Int, SlotPayload>? = null
         for (i in 0 until Header.SLOT_COUNT) {
             val bytes = h.slots[i]
             val plain = crypto.opened(bytes.copyOfRange(Crypto.NONCE_BYTES, bytes.size), slotAd(i, h), bytes.copyOfRange(0, Crypto.NONCE_BYTES), kek)
-            val payload = plain?.let { SlotPayload.decode(it) }
+            val payload = plain?.let { SlotPayload.decode(it, crypto) }
             plain?.wipe()
-            if (payload != null && payload.type == ROLE[i] && found == null) found = i to payload else payload?.masterKey?.wipe()
+            if (payload != null && payload.type == ROLE[i] && found == null) found = i to payload else payload?.masterKey?.close()
         }
         return found
     }

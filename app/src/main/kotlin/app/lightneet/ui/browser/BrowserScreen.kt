@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material.icons.outlined.SelectAll
@@ -197,6 +198,11 @@ fun BrowserScreen(vm: AppViewModel, snackbar: SnackbarHostState, beforeExternal:
                             text = { Text(stringResource(R.string.import_files)) },
                             leadingIcon = { Icon(Icons.Outlined.UploadFile, null) },
                             onClick = { addMenu = false; beforeExternal(); importLauncher.launch(arrayOf("*/*")) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.take_photo)) },
+                            leadingIcon = { Icon(Icons.Outlined.PhotoCamera, null) },
+                            onClick = { addMenu = false; vm.openCamera() },
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.new_folder)) },

@@ -1,0 +1,5 @@
+• Built-in camera: photos are encrypted straight from memory
+• Built-in password keyboard (Latin, Cyrillic, symbols)
+• In-memory PDF viewer (Android 11+)
+• Disguise the icon as "Calculator"
+• Long-lived keys moved into libsodium's locked memory

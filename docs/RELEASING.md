@@ -78,3 +78,55 @@ Gradle проверяет SHA-256 каждой библиотеки и плаг�
 
 Для `aapt2` в файл вручную добавлены хеши сборок под macOS и Windows, чтобы проект собирался на
 любой ОС. При обновлении AGP их тоже нужно обновить.
+
+## F-Droid и Google Play
+
+Описание, значок, скриншоты и списки изменений лежат в
+[`fastlane/metadata/android/`](../fastlane/metadata/android) — в формате, который читают и
+F-Droid, и `fastlane supply` для Google Play. Список изменений называется по `versionCode`
+(`v0.3.0` → `300.txt`). Добавляйте новый файл к каждому релизу.
+
+### F-Droid
+
+F-Droid собирает приложение сам, из исходников. Чтобы его туда добавить:
+
+1. Сделайте форк [fdroiddata](https://gitlab.com/fdroid/fdroiddata) на GitLab.
+2. Добавьте файл `metadata/io.github.myfreezeart.lightneet.yml`:
+   ```yaml
+   Categories:
+     - Security
+   License: GPL-3.0-only
+   SourceCode: https://github.com/myfreeze-art/Lightneet
+   IssueTracker: https://github.com/myfreeze-art/Lightneet/issues
+   AutoName: Lightneet
+   RepoType: git
+   Repo: https://github.com/myfreeze-art/Lightneet.git
+   Builds:
+     - versionName: 0.3.0
+       versionCode: 300
+       commit: v0.3.0
+       subdir: app
+       gradle:
+         - yes
+   AutoUpdateMode: Version
+   UpdateCheckMode: Tags
+   ```
+   Без переменных окружения сборка берёт версию из `app/build.gradle.kts`, поэтому перед тегом
+   обновите там `versionName`.
+3. Проверьте локально: `fdroid build -v -l io.github.myfreezeart.lightneet`, затем откройте
+   merge request.
+
+Что может спросить ревьюер F-Droid: lazysodium-android и JNA приходят из Maven Central с готовыми
+`.so`. Если потребуют собирать libsodium из исходников, это делается в `prebuild` (скрипт сборки
+libsodium для Android есть в её репозитории).
+
+### Google Play
+
+1. Настройте постоянный ключ (см. выше): тогда в релиз попадает `Lightneet-<версия>.aab`.
+2. В Play Console создайте приложение `io.github.myfreezeart.lightneet` и включите
+   **Play App Signing**. Загрузите AAB — ключ из GitHub станет ключом загрузки.
+3. Заполните анкеты: приложение не собирает данные и не имеет доступа в сеть. Разрешение
+   `CAMERA` нужно для встроенной камеры.
+4. Тексты и скриншоты можно загрузить вручную или командой
+   `fastlane supply --aab Lightneet-0.3.0.aab --track internal` (нужен JSON-ключ сервисного
+   аккаунта Play Console; в репозиторий его не кладите).

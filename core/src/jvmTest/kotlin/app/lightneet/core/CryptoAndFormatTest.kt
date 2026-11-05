@@ -1,6 +1,7 @@
 package app.lightneet.core
 
 import app.lightneet.core.crypto.Crypto
+import app.lightneet.core.crypto.SecretKey
 import app.lightneet.core.crypto.opened
 import app.lightneet.core.crypto.sealed
 import app.lightneet.core.crypto.subkey
@@ -13,6 +14,8 @@ import app.lightneet.core.format.SlotType
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -56,6 +59,49 @@ class CryptoAndFormatTest {
         assertFalse(crypto.subkey(master, "index").contentEquals(crypto.subkey(master, "superblock")))
     }
 
+    /** Keys in guarded memory must give exactly the same results as the plain-array functions. */
+    @Test
+    fun guardedKeysMatchPlainKeys() {
+        val raw = crypto.randomBytes(32)
+        val guarded = crypto.secretKey(raw.copyOf())
+        val msg = "secret".encodeToByteArray()
+        val ad = "ad".encodeToByteArray()
+
+        val ct = crypto.sealed(msg, ad, nonce, guarded)
+        assertContentEquals(ct, crypto.sealed(msg, ad, nonce, raw), "same key, same nonce, same ciphertext")
+        assertContentEquals(msg, crypto.opened(ct, ad, nonce, guarded))
+        assertNull(crypto.opened(ct, "other".encodeToByteArray(), nonce, guarded))
+
+        val label = "lightneet/v2/index".encodeToByteArray()
+        crypto.deriveKey(guarded, label).use { derived ->
+            assertContentEquals(crypto.keyedHash(raw, label), derived.bytes())
+        }
+        guarded.close()
+    }
+
+    @Test
+    fun guardedKeyWipesItsSourceAndRefusesUseAfterClose() {
+        val source = crypto.randomBytes(32)
+        val key = crypto.secretKey(source)
+        assertTrue(source.all { it == 0.toByte() }, "the JVM copy is wiped at once")
+        assertEquals(32, key.size)
+        key.close()
+        key.close() // idempotent
+        assertTrue(key.isClosed)
+        assertFailsWith<IllegalStateException> { crypto.sealed("x".encodeToByteArray(), ByteArray(0), nonce, key) }
+    }
+
+    @Test
+    fun randomGuardedKeysDiffer() {
+        val a = crypto.randomSecretKey()
+        val b = crypto.randomSecretKey()
+        assertFalse(a.bytes().contentEquals(b.bytes()))
+        assertFalse(a.bytes().all { it == 0.toByte() })
+        a.close(); b.close()
+    }
+
+    private fun SecretKey.bytes() = ByteArray(size).also { copyInto(it) }
+
     @Test
     fun headerRoundTrip() {
         val h = Header(
@@ -78,11 +124,11 @@ class CryptoAndFormatTest {
 
     @Test
     fun slotPayloadRoundTrip() {
-        val p = SlotPayload(SlotType.PANIC, PanicMode.DESTROY_ALL, crypto.randomBytes(32), 7, 11)
-        val d = assertNotNull(SlotPayload.decode(p.encode()))
+        val p = SlotPayload(SlotType.PANIC, PanicMode.DESTROY_ALL, crypto.randomSecretKey(), 7, 11)
+        val d = assertNotNull(SlotPayload.decode(p.encode(), crypto))
         assertEquals(SlotType.PANIC, d.type)
         assertEquals(PanicMode.DESTROY_ALL, d.panicMode)
-        assertContentEquals(p.masterKey, d.masterKey)
+        assertContentEquals(p.masterKey.bytes(), d.masterKey.bytes())
         assertEquals(7, d.superblockA)
         assertEquals(11, d.superblockB)
     }

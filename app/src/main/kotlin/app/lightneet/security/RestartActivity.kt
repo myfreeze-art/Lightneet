@@ -16,7 +16,10 @@ class RestartActivity : Activity() {
         super.onCreate(savedInstanceState)
         val pid = intent.getIntExtra(EXTRA_PID, -1)
         if (pid > 0 && pid != Process.myPid()) Process.killProcess(pid)
-        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        // Through the launcher alias that is currently enabled, so a disguised app stays
+        // disguised in the recent-apps list too.
+        val launch = packageManager.getLaunchIntentForPackage(packageName) ?: Intent(this, MainActivity::class.java)
+        startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         finish()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)

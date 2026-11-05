@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.IntentCompat
 import app.lightneet.LightneetApp
 import app.lightneet.ui.browser.BrowserScreen
+import app.lightneet.ui.camera.CameraScreen
 import app.lightneet.ui.setup.SetupScreen
 import app.lightneet.ui.settings.SettingsScreen
 import app.lightneet.ui.theme.LightneetTheme
@@ -119,9 +120,10 @@ private fun Root(vm: AppViewModel, beforeExternal: () -> Unit) {
                 Screen.Browser -> BrowserScreen(vm, snackbar, beforeExternal)
                 is Screen.Viewer -> key(s.entryId) { ViewerScreen(vm, s.entryId, beforeExternal) }
                 Screen.Settings -> SettingsScreen(vm, snackbar)
+                Screen.Camera -> CameraScreen(vm, beforeExternal)
             }
         }
-        if (gate != Gate.OPEN || screen is Screen.Viewer) {
+        if (gate != Gate.OPEN || screen is Screen.Viewer || screen == Screen.Camera) {
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
         }
     }

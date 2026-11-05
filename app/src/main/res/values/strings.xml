@@ -186,4 +186,27 @@
     <string name="done_grown">Storage enlarged</string>
     <string name="setup_attempts_title">Wrong-password limit</string>
     <string name="setup_attempts_body">After %1$d wrong passwords in a row, everything is erased. You can change or disable this in Settings.</string>
+
+    <!-- Roadmap: keyboard, disguise, camera -->
+    <string name="disguise_label">Calculator</string>
+    <string name="settings_interface">Inconspicuousness</string>
+    <string name="builtin_keyboard">Built-in password keyboard</string>
+    <string name="builtin_keyboard_hint">Passwords are typed on Lightneet\'s own keyboard, so a third-party keyboard app never sees them.</string>
+    <string name="disguise">Disguise as Calculator</string>
+    <string name="disguise_hint">The icon and name in the launcher and share menu become “Calculator”. The home-screen shortcut may disappear — add it again from the app list.</string>
+    <string name="kb_shift">Shift</string>
+    <string name="kb_backspace">Delete</string>
+    <string name="kb_language">Switch language</string>
+    <string name="kb_space">Space</string>
+    <string name="kb_done">Done</string>
+    <string name="take_photo">Take a photo</string>
+    <string name="camera_shutter">Shutter</string>
+    <string name="camera_switch">Switch camera</string>
+    <string name="camera_denied">Lightneet needs camera access to take photos</string>
+    <string name="camera_failed">Camera error: %1$s</string>
+    <plurals name="photos_saved">
+        <item quantity="one">%d photo encrypted</item>
+        <item quantity="other">%d photos encrypted</item>
+    </plurals>
+    <string name="camera_hint">Photos go straight into the vault. They never reach the gallery or the phone\'s storage.</string>
 </resources>

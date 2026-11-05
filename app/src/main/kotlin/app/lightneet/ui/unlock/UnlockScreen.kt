@@ -20,6 +20,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.lightneet.R
+import app.lightneet.security.PasswordKeyboard
 import app.lightneet.security.SecurePasswordField
 import app.lightneet.security.rememberSecurePasswordState
 import app.lightneet.ui.UnlockMessage
@@ -39,40 +40,41 @@ fun UnlockScreen(busy: Boolean, message: UnlockMessage?, pendingShared: Int, onU
     val password = rememberSecurePasswordState()
     val submit = { if (password.length > 0) onUnlock(password.takeBytes()) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Gap(96.dp)
-        Logo(72.dp)
-        Gap(20.dp)
-        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
-        Gap(40.dp)
-        SecurePasswordField(password, stringResource(R.string.hint_password), onDone = submit, requestFocus = true)
-        Gap(12.dp)
-        val text = when (message) {
-            is UnlockMessage.Wrong -> message.attemptsLeft?.let {
-                pluralStringResource(R.plurals.wrong_password_left, it, it)
-            } ?: stringResource(R.string.wrong_password)
-            UnlockMessage.Destroyed -> stringResource(R.string.destroyed_title)
-            UnlockMessage.Unavailable -> stringResource(R.string.unavailable_short)
-            null -> ""
-        }
-        Text(text, color = LnColors.Danger, style = MaterialTheme.typography.bodyMedium)
-        Gap(16.dp)
-        PrimaryButton(stringResource(R.string.unlock), submit, enabled = password.length > 0, busy = busy)
-        if (pendingShared > 0) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Gap(96.dp)
+            Logo(72.dp)
             Gap(20.dp)
-            Text(
-                pluralStringResource(R.plurals.pending_shared, pendingShared, pendingShared),
-                color = LnColors.TextMuted, style = MaterialTheme.typography.bodySmall,
-            )
+            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
+            Gap(40.dp)
+            SecurePasswordField(password, stringResource(R.string.hint_password), onDone = submit, requestFocus = true)
+            Gap(12.dp)
+            val text = when (message) {
+                is UnlockMessage.Wrong -> message.attemptsLeft?.let {
+                    pluralStringResource(R.plurals.wrong_password_left, it, it)
+                } ?: stringResource(R.string.wrong_password)
+                UnlockMessage.Destroyed -> stringResource(R.string.destroyed_title)
+                UnlockMessage.Unavailable -> stringResource(R.string.unavailable_short)
+                null -> ""
+            }
+            Text(text, color = LnColors.Danger, style = MaterialTheme.typography.bodyMedium)
+            Gap(16.dp)
+            PrimaryButton(stringResource(R.string.unlock), submit, enabled = password.length > 0, busy = busy)
+            if (pendingShared > 0) {
+                Gap(20.dp)
+                Text(
+                    pluralStringResource(R.plurals.pending_shared, pendingShared, pendingShared),
+                    color = LnColors.TextMuted, style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
+        PasswordKeyboard()
     }
 }
 

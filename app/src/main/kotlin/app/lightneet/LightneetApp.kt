@@ -8,6 +8,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import app.lightneet.data.VaultHolder
 import app.lightneet.security.AutoLock
 import app.lightneet.security.RestartActivity
+import app.lightneet.security.UiPrefs
 
 open class LightneetApp : Application() {
     lateinit var holder: VaultHolder
@@ -15,6 +16,9 @@ open class LightneetApp : Application() {
 
     lateinit var autoLock: AutoLock
         private set
+
+    /** Lock-screen preferences (no secrets). */
+    val prefs by lazy { UiPrefs(this) }
 
     override fun onCreate() {
         super.onCreate()

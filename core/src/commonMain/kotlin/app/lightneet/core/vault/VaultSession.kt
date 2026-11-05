@@ -366,7 +366,7 @@ class VaultSession internal constructor(
             closed = true
             runCatching { pool.touchAll() }
             store.close()
-            payload.masterKey.wipe()
+            payload.masterKey.close()
             if (this::index.isInitialized) index.entries.forEach { it.key.wipe() }
             pool.close()
         }

@@ -1,6 +1,8 @@
 package app.lightneet.core.format
 
 import app.lightneet.core.crypto.Crypto
+import app.lightneet.core.crypto.SecretKey
+import app.lightneet.core.crypto.wipe
 import app.lightneet.core.util.ByteReader
 import app.lightneet.core.util.ByteWriter
 
@@ -133,26 +135,33 @@ class SlotPayload(
     val type: SlotType,
     val panicMode: PanicMode?,
     /** For MAIN/HIDDEN: that vault's master key. For PANIC: the main vault's master key. */
-    val masterKey: ByteArray,
+    val masterKey: SecretKey,
     val superblockA: Long,
     val superblockB: Long,
 ) {
     fun encode(): ByteArray {
         val w = ByteWriter(ByteArray(Header.SLOT_PAYLOAD_BYTES))
         w.u8(type.code).u8(panicMode?.code ?: 0).skip(6)
-        w.raw(masterKey).u64(superblockA).u64(superblockB)
+        val key = ByteArray(masterKey.size)
+        masterKey.copyInto(key)
+        w.raw(key).u64(superblockA).u64(superblockB)
+        key.wipe()
         return w.bytes
     }
 
     companion object {
-        fun decode(bytes: ByteArray): SlotPayload? {
+        /** The master key moves into guarded memory; [bytes] still holds it and must be wiped by the caller. */
+        fun decode(bytes: ByteArray, crypto: Crypto): SlotPayload? {
             val r = ByteReader(bytes)
             val typeCode = r.u8()
             val type = SlotType.entries.firstOrNull { it.code == typeCode } ?: return null
             val modeCode = r.u8()
             val mode = PanicMode.entries.firstOrNull { it.code == modeCode }
             r.skip(6)
-            return SlotPayload(type, mode, r.raw(Crypto.KEY_BYTES), r.u64(), r.u64())
+            val key = r.raw(Crypto.KEY_BYTES)
+            val a = r.u64()
+            val b = r.u64()
+            return SlotPayload(type, mode, crypto.secretKey(key), a, b)
         }
     }
 }
