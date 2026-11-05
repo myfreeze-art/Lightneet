@@ -51,6 +51,35 @@ class VaultTest {
         }
     }
 
+    /** More files than the key ring's first region holds: it must grow, survive a reopen and deletions. */
+    @Test
+    fun manyFilesKeepTheirKeysAcrossGrowthReopenAndDelete() {
+        val (_, s) = f.create()
+        val files = (0 until 150).map { i -> s.import("f$i.txt", "file number $i".encodeToByteArray()) }
+        s.delete(files.filter { it.name.endsWith("7.txt") }.map { it.id })
+        s.close()
+
+        val s2 = open(Fixture.MAIN_PW)
+        val left = s2.children(Entry.ROOT_ID)
+        assertEquals(150 - 15, left.size)
+        left.forEach { e -> assertEquals("file number ${e.name.removePrefix("f").removeSuffix(".txt")}", s2.readAll(e.id).decodeToString()) }
+        // Freed slots are reused and do not disturb the others.
+        val newer = s2.import("new.txt", "fresh".encodeToByteArray())
+        assertEquals("fresh", s2.readAll(newer.id).decodeToString())
+        left.forEach { e -> assertTrue(s2.readAll(e.id).isNotEmpty()) }
+    }
+
+    /** The app only ever sees entries without keys; the keys live in guarded memory. */
+    @Test
+    fun entriesHandedOutCarryNoKeys() {
+        val (_, s) = f.create()
+        s.import("a.txt", "secret".encodeToByteArray())
+        s.close()
+        val s2 = open(Fixture.MAIN_PW)
+        assertTrue(s2.entries().all { it.key.isEmpty() })
+        assertEquals("secret", s2.readAll(s2.entries().single().id).decodeToString())
+    }
+
     @Test
     fun emptyAndExactBlockSizedFiles() {
         val (_, s) = f.create()

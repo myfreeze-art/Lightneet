@@ -100,6 +100,34 @@ class CryptoAndFormatTest {
         a.close(); b.close()
     }
 
+    @Test
+    fun keyRingMatchesPlainKeysAndGrows() {
+        val ring = crypto.newKeyRing()
+        val raw = (0 until 200).map { crypto.randomBytes(32) }
+        raw.forEachIndexed { i, k -> ring.put(i.toLong(), k.copyOf()) } // grows 64 → 128 → 256
+        assertEquals(200, ring.size)
+        val msg = "secret".encodeToByteArray()
+        val ad = "ad".encodeToByteArray()
+        raw.forEachIndexed { i, k ->
+            val out = ByteArray(msg.size + Crypto.TAG_BYTES)
+            crypto.seal(out, msg, ad, nonce, ring, i.toLong())
+            assertContentEquals(crypto.sealed(msg, ad, nonce, k), out, "slot $i survived growth")
+            assertContentEquals(k, ring.copyOut(i.toLong()))
+        }
+        ring.remove(5)
+        assertFalse(5L in ring)
+        assertFailsWith<IllegalStateException> { ring.copyOut(5) }
+        ring.putRandom(1000) // reuses the freed slot
+        assertContentEquals(raw[6], ring.copyOut(6))
+        assertFalse(ring.copyOut(1000).contentEquals(raw[5]))
+        val src = crypto.randomBytes(32)
+        ring.put(2000, src)
+        assertTrue(src.all { it == 0.toByte() }, "put wipes the source")
+        ring.close()
+        ring.close()
+        assertFailsWith<IllegalStateException> { ring.copyOut(6) }
+    }
+
     private fun SecretKey.bytes() = ByteArray(size).also { copyInto(it) }
 
     @Test

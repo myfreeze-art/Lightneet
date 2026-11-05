@@ -32,6 +32,11 @@ internal object SodiumNative {
 
     @JvmStatic external fun sodium_mprotect_readonly(ptr: Pointer): Int
 
+    @JvmStatic external fun sodium_mprotect_readwrite(ptr: Pointer): Int
+
+    /** `a += b` as little-endian numbers. With `a` all zeros this is a native copy of `b`. */
+    @JvmStatic external fun sodium_add(a: Pointer, b: Pointer, len: NativeLong)
+
     @JvmStatic external fun randombytes_buf(buf: Pointer, size: NativeLong)
 
     @JvmStatic external fun crypto_generichash(out: Pointer, outlen: NativeLong, input: ByteArray, inlen: Long, key: Pointer, keylen: NativeLong): Int

@@ -1,6 +1,7 @@
 package app.lightneet.core.vault
 
 import app.lightneet.core.crypto.Crypto
+import app.lightneet.core.crypto.KeyRing
 import app.lightneet.core.crypto.SecretKey
 import app.lightneet.core.crypto.wipe
 import app.lightneet.core.format.HiddenReserve
@@ -39,6 +40,12 @@ internal class BlockCodec(private val pool: BlockPool, private val crypto: Crypt
 
     fun read(index: Long, key: SecretKey, ad: ByteArray): ByteArray? =
         read(index) { out, ct, nonce -> crypto.open(out, ct, ad, nonce, key) }
+
+    fun write(index: Long, plaintext: ByteArray, ring: KeyRing, id: Long, ad: ByteArray) =
+        write(index, plaintext) { ct, nonce -> crypto.seal(ct, plaintext, ad, nonce, ring, id) }
+
+    fun read(index: Long, ring: KeyRing, id: Long, ad: ByteArray): ByteArray? =
+        read(index) { out, ct, nonce -> crypto.open(out, ct, ad, nonce, ring, id) }
 
     private inline fun write(index: Long, plaintext: ByteArray, seal: (ct: ByteArray, nonce: ByteArray) -> Unit) {
         require(plaintext.size == capacity)

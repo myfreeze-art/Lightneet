@@ -39,6 +39,12 @@ class VaultSession internal constructor(
     private val lock = SynchronizedObject()
     private val codec = BlockCodec(pool, crypto)
     private val store = IndexStore(crypto, pool, codec, payload.masterKey, payload.superblockA to payload.superblockB, epoch)
+
+    /**
+     * Per-file keys, in guarded memory. In [index] every entry's `key` is empty; the keys are
+     * copied in only while the index is serialised for a commit ([persist]).
+     */
+    private val fileKeys = crypto.newKeyRing()
     private lateinit var index: VaultIndex
     private lateinit var allocator: Allocator
     private var closed = false
@@ -48,9 +54,9 @@ class VaultSession internal constructor(
             if (fresh) {
                 index = VaultIndex()
                 allocator = Allocator(pool, region, store.superblockIndices().toHashSet(), canGrow)
-                store.commit(index, allocator)
+                persist(index)
             } else {
-                index = store.load() ?: throw CorruptedDataException("vault index is unreadable")
+                index = withoutKeys(store.load() ?: throw CorruptedDataException("vault index is unreadable"))
                 val owned = HashSet<Long>()
                 owned += store.superblockIndices()
                 owned += store.indexBlocks
@@ -136,7 +142,7 @@ class VaultSession internal constructor(
     ): Entry {
         read { requireFolder(index, parentId) }
         val id = reserveId()
-        val key = crypto.randomBytes(Crypto.KEY_BYTES)
+        synchronized(lock) { fileKeys.putRandom(id) }
         val blocks = ArrayList<Long>()
         val chunk = ByteArray(codec.capacity)
         var size = 0L
@@ -155,7 +161,7 @@ class VaultSession internal constructor(
                         ensureOpen()
                         val b = allocator.allocate()
                         blocks += b
-                        codec.write(b, chunk, key, ad("fd", b, id, (blocks.size - 1).toLong()))
+                        codec.write(b, chunk, fileKeys, id, ad("fd", b, id, (blocks.size - 1).toLong()))
                     }
                     size += filled
                     onProgress(size)
@@ -169,7 +175,7 @@ class VaultSession internal constructor(
                 val e = Entry(
                     id = id, parentId = parentId, name = uniqueName(idx, parentId, name), isFolder = false,
                     size = size, mimeType = mimeType, createdAt = now(), modifiedAt = now(),
-                    key = key, blocks = blocks.toList(),
+                    blocks = blocks.toList(),
                 )
                 created = e
                 idx.copy(entries = idx.entries + e)
@@ -177,8 +183,8 @@ class VaultSession internal constructor(
             return created!!
         } catch (t: Throwable) {
             chunk.wipe()
-            key.wipe()
             synchronized(lock) {
+                fileKeys.remove(id)
                 if (!closed) blocks.forEach { pool.scrub(it); allocator.release(it) }
             }
             throw t
@@ -214,11 +220,11 @@ class VaultSession internal constructor(
             // New epoch: old copies of the index (which still hold the deleted files' keys)
             // become undecryptable once the header records the new epoch.
             val epoch = crypto.randomBytes(Crypto.KEY_BYTES)
-            store.commit(next, allocator, newEpoch = epoch) { vault.setEpoch(slotIndex, epoch) }
+            persist(next, newEpoch = epoch) { vault.setEpoch(slotIndex, epoch) }
             index = next
             removed.forEach { e ->
                 e.ownedBlocks().forEach { pool.scrub(it); allocator.release(it) }
-                e.key.wipe()
+                fileKeys.remove(e.id)
             }
         }
     }
@@ -234,7 +240,7 @@ class VaultSession internal constructor(
             blocks.forEachIndexed { seq, b ->
                 chunk.fill(0)
                 image.copyInto(chunk, 0, seq * cap, minOf(image.size, (seq + 1) * cap))
-                codec.write(b, chunk, e.key, ad("th", b, id, seq.toLong()))
+                codec.write(b, chunk, fileKeys, id, ad("th", b, id, seq.toLong()))
             }
             chunk.wipe()
             val old = e.thumbnailBlocks
@@ -250,7 +256,7 @@ class VaultSession internal constructor(
         val out = ByteArray(e.thumbnailSize)
         val cap = codec.capacity
         e.thumbnailBlocks.forEachIndexed { seq, b ->
-            val plain = codec.read(b, e.key, ad("th", b, id, seq.toLong())) ?: throw CorruptedDataException("thumbnail block failed authentication")
+            val plain = codec.read(b, fileKeys, id, ad("th", b, id, seq.toLong())) ?: throw CorruptedDataException("thumbnail block failed authentication")
             val from = seq * cap
             plain.copyInto(out, from, 0, minOf(cap, out.size - from))
             plain.wipe()
@@ -297,7 +303,7 @@ class VaultSession internal constructor(
     internal fun readFileBlock(entry: Entry, seq: Int): ByteArray = synchronized(lock) {
         ensureOpen()
         val b = entry.blocks[seq]
-        codec.read(b, entry.key, ad("fd", b, entry.id, seq.toLong())) ?: throw CorruptedDataException("data block failed authentication")
+        codec.read(b, fileKeys, entry.id, ad("fd", b, entry.id, seq.toLong())) ?: throw CorruptedDataException("data block failed authentication")
     }
 
     // ---------------------------------------------------------------- passwords & vault management
@@ -367,7 +373,7 @@ class VaultSession internal constructor(
             runCatching { pool.touchAll() }
             store.close()
             payload.masterKey.close()
-            if (this::index.isInitialized) index.entries.forEach { it.key.wipe() }
+            fileKeys.close()
             pool.close()
         }
         vault.sessionClosed(this)
@@ -399,9 +405,34 @@ class VaultSession internal constructor(
     }
 
     private fun commit(next: VaultIndex) {
-        store.commit(next, allocator)
+        persist(next)
         index = next
     }
+
+    /** Writes [next] with the file keys copied in for serialisation, and wipes those copies. */
+    private fun persist(next: VaultIndex, newEpoch: ByteArray? = null, persistEpoch: () -> Unit = {}) {
+        val copies = ArrayList<ByteArray>()
+        val withKeys = next.copy(
+            entries = next.entries.map { e ->
+                if (e.id in fileKeys) e.copy(key = fileKeys.copyOut(e.id).also { copies += it }) else e
+            },
+        )
+        try {
+            store.commit(withKeys, allocator, newEpoch, persistEpoch)
+        } finally {
+            copies.forEach { it.wipe() }
+        }
+    }
+
+    /** Moves every file key of a freshly loaded index into [fileKeys]. */
+    private fun withoutKeys(loaded: VaultIndex): VaultIndex = loaded.copy(
+        entries = loaded.entries.map { e ->
+            if (e.key.isEmpty()) e else {
+                fileKeys.put(e.id, e.key)
+                e.copy(key = NO_KEY)
+            }
+        },
+    )
 
     private fun requireFolder(idx: VaultIndex, id: Long) {
         require(id == Entry.ROOT_ID || idx.entries.any { it.id == id && it.isFolder }) { "no such folder: $id" }
@@ -436,6 +467,8 @@ class VaultSession internal constructor(
  * the most recent block in memory. Used by the image/text viewers, the video player
  * (seeking works without decrypting the beginning) and export.
  */
+private val NO_KEY = ByteArray(0)
+
 class VaultFileReader internal constructor(private val session: VaultSession, private val entry: Entry) : AutoCloseable {
     val size: Long = entry.size
     val name: String = entry.name

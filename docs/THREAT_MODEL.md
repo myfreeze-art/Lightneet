@@ -17,7 +17,7 @@ writing.
 | **Coercion: "is there more?"** | The hidden vault lives in a reserve that always exists and always looks used. Slots are always four, and unused ones are noise. Setting passwords never answers "already in use", so guesses for the hidden password cannot be tested from inside the main vault. The hidden vault never grows the storage by itself. Segment timestamps are refreshed by every session. |
 | **Deleted files and old storage copies** | Deletions move the vault to a new epoch. A copy of the storage taken before the deletion stays undecryptable even if the password is obtained later. |
 | **Secrets lingering in memory after lock** | Keys are wiped, and then the whole app process is ended. The OS reclaims its memory, including copies we cannot reach (native buffers, Strings, Bitmaps). |
-| **Keys leaking from memory while unlocked** (swap, core dumps, out-of-bounds reads) | Master keys, index keys and the KEK never exist as JVM arrays. They live in `sodium_malloc` memory: `mlock`ed (never swapped), excluded from core dumps, read-only, fenced by guard pages, and zeroed by `sodium_free`. They are passed to libsodium by pointer, so JNA makes no unwiped copies. |
+| **Keys leaking from memory while unlocked** (swap, core dumps, out-of-bounds reads) | Master keys, index keys, the KEK and every per-file key never live in JVM arrays. They live in `sodium_malloc` memory: `mlock`ed (never swapped), excluded from core dumps, read-only, fenced by guard pages, and zeroed by `sodium_free`. They are passed to libsodium by pointer, so JNA makes no unwiped copies. |
 | **Shoulder-surfing, screenshots, recent-apps preview** | `FLAG_SECURE`, a blank recents preview, and the same title in every vault. |
 | **Malicious accessibility services / overlays** | On Android 14+, the screen is marked accessibility-data-sensitive, so only genuine accessibility tools can read it. Taps are ignored while another app draws over Lightneet. |
 | **Leaving through the file picker** | Opening the system picker suspends auto-lock for at most 2 minutes. |
@@ -46,10 +46,12 @@ writing.
 
   The Android API does not expose hardware rollback resistance for app keys. Full protection
   needs hardware we cannot control.
-- **Memory while unlocked.** Decrypted data and the decrypted index are in the app's memory while
-  a vault is open. The index includes the **per-file keys**, which therefore stay ordinary JVM
-  arrays (only long-lived keys are in guarded memory). The JVM and JNA may make copies that
-  cannot be wiped before the process ends. Android's zram swap is RAM, not disk, so `mlock`
+- **Memory while unlocked.** Decrypted data and the decrypted index (names, sizes, dates) are in
+  the app's memory while a vault is open. Keys are not, with two brief exceptions: a loaded
+  index holds the file keys until they are moved into guarded memory, and each commit copies
+  them out to serialise the index (the copies are wiped right after). With thousands of files
+  the key region may exceed Android's `mlock` limit; it then stays guarded but unlocked. The JVM
+  and JNA may make copies of decrypted data that cannot be wiped before the process ends. Android's zram swap is RAM, not disk, so `mlock`
   mainly helps against core dumps and over-reads rather than swap files.
 - **Third-party keyboards when the built-in one is off.** They may still log keystrokes despite
   the flags. The built-in keyboard is off by default.

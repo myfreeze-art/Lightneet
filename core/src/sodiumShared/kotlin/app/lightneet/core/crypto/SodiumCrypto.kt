@@ -93,8 +93,129 @@ internal class SodiumCrypto(private val sodium: Sodium) : Crypto {
         return rc == 0
     }
 
+    override fun newKeyRing(): KeyRing = GuardedKeyRing()
+
+    override fun seal(out: ByteArray, plaintext: ByteArray, ad: ByteArray, nonce: ByteArray, ring: KeyRing, id: Long) {
+        require(out.size == plaintext.size + Crypto.TAG_BYTES)
+        require(nonce.size == Crypto.NONCE_BYTES)
+        val rc = (ring as GuardedKeyRing).use(id) { k ->
+            SodiumNative.crypto_aead_xchacha20poly1305_ietf_encrypt(out, null, plaintext, plaintext.size.toLong(), ad, ad.size.toLong(), null, nonce, k)
+        }
+        check(rc == 0) { "encryption failed" }
+    }
+
+    override fun open(out: ByteArray, ciphertext: ByteArray, ad: ByteArray, nonce: ByteArray, ring: KeyRing, id: Long): Boolean {
+        require(out.size == ciphertext.size - Crypto.TAG_BYTES)
+        require(nonce.size == Crypto.NONCE_BYTES)
+        val rc = (ring as GuardedKeyRing).use(id) { k ->
+            SodiumNative.crypto_aead_xchacha20poly1305_ietf_decrypt(out, null, null, ciphertext, ciphertext.size.toLong(), ad, ad.size.toLong(), nonce, k)
+        }
+        if (rc != 0) out.wipe()
+        return rc == 0
+    }
+
     private companion object {
         const val ALG_ARGON2ID13 = 2
+    }
+}
+
+/**
+ * Per-file keys in one `sodium_malloc` region: read-only except for the instant a slot is
+ * written or zeroed. All access holds the ring's monitor, so the region is never written,
+ * reallocated or freed under a running operation.
+ */
+internal class GuardedKeyRing : KeyRing() {
+    private val slots = HashMap<Long, Int>()
+    private val free = ArrayDeque<Int>()
+    private var capacity = 0
+    private var region: Pointer? = null
+    private var closed = false
+
+    override val size: Int @Synchronized get() = slots.size
+
+    @Synchronized
+    fun <T> use(id: Long, block: (Pointer) -> T): T {
+        check(!closed) { "key ring was closed" }
+        val slot = slots[id] ?: throw IllegalStateException("no key for entry $id")
+        return block(region!!.share(slot.toLong() * KEY))
+    }
+
+    @Synchronized
+    override fun put(id: Long, key: ByteArray) {
+        try {
+            require(key.size == KEY)
+            write(id) { it.write(0, key, 0, KEY) }
+        } finally {
+            key.wipe()
+        }
+    }
+
+    @Synchronized
+    override fun putRandom(id: Long) = write(id) { SodiumNative.randombytes_buf(it, NativeLong(KEY.toLong())) }
+
+    @Synchronized
+    override fun remove(id: Long) {
+        if (closed) return
+        val slot = slots.remove(id) ?: return
+        val r = region!!
+        writable(r) { r.setMemory(slot.toLong() * KEY, KEY.toLong(), 0) }
+        free.addLast(slot)
+    }
+
+    @Synchronized
+    override fun contains(id: Long) = !closed && id in slots
+
+    @Synchronized
+    override fun copyOut(id: Long): ByteArray = use(id) { it.getByteArray(0, KEY) }
+
+    @Synchronized
+    override fun close() {
+        if (closed) return
+        closed = true
+        region?.let(SodiumNative::sodium_free) // zeroes every slot
+        region = null
+        slots.clear()
+        free.clear()
+    }
+
+    private fun write(id: Long, fill: (Pointer) -> Unit) {
+        check(!closed) { "key ring was closed" }
+        val slot = slots[id] ?: (free.removeFirstOrNull() ?: nextSlot()).also { slots[id] = it }
+        val r = region!!
+        writable(r) { fill(r.share(slot.toLong() * KEY)) }
+    }
+
+    /** Returns a never-used slot, doubling the region (copy, then free the old one) when full. */
+    private fun nextSlot(): Int {
+        val used = slots.size + free.size
+        if (used == capacity) {
+            val grown = if (capacity == 0) INITIAL else capacity * 2
+            val next = SodiumNative.sodium_malloc(NativeLong(grown.toLong() * KEY)) ?: throw OutOfMemoryError("sodium_malloc")
+            next.setMemory(0, grown.toLong() * KEY, 0)
+            // Copy natively (0 + old = old): the keys never pass through the JVM heap.
+            region?.let { old ->
+                SodiumNative.sodium_add(next, old, NativeLong(capacity.toLong() * KEY))
+                SodiumNative.sodium_free(old)
+            }
+            check(SodiumNative.sodium_mprotect_readonly(next) == 0)
+            region = next
+            capacity = grown
+        }
+        return used
+    }
+
+    private inline fun writable(r: Pointer, block: () -> Unit) {
+        check(SodiumNative.sodium_mprotect_readwrite(r) == 0)
+        try {
+            block()
+        } finally {
+            check(SodiumNative.sodium_mprotect_readonly(r) == 0)
+        }
+    }
+
+    private companion object {
+        const val KEY = Crypto.KEY_BYTES
+        const val INITIAL = 64
     }
 }
 
